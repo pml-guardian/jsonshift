@@ -4,4 +4,4 @@ from .exceptions import MappingMissingError, InvalidDestinationPath
 
 __all__ = ["Mapper", "ArrayMapper", "MappingMissingError", "InvalidDestinationPath"]
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
