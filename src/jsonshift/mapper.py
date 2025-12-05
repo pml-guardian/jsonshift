@@ -8,98 +8,77 @@ _INDEX = re.compile(r"\[(\d+)\]")
 
 
 def _split_path(path: str) -> List[Union[str, int]]:
-    """Split a dotted or indexed path like 'a.b[0].c' into tokens ['a', 'b', 0, 'c']."""
     if not isinstance(path, str) or not path:
         raise ValueError("Path must be a non-empty string.")
     parts: List[Union[str, int]] = []
-    for chunk in path.split("."):
-        while chunk:
-            m = _INDEX.search(chunk)
-            if not m:
-                parts.append(chunk)
+    for segment in path.split("."):
+        while segment:
+            match = _INDEX.search(segment)
+            if not match:
+                parts.append(segment)
                 break
-            head = chunk[: m.start()]
+            head = segment[: match.start()]
             if head:
                 parts.append(head)
-            parts.append(int(m.group(1)))
-            chunk = chunk[m.end():]
+            parts.append(int(match.group(1)))
+            segment = segment[match.end():]
     return parts
 
 
 def _get(obj: Any, path: str, *, default: Any = _MISSING) -> Any:
-    """Safely retrieve a nested value from a dict/list structure following a dotted path."""
-    cur = obj
-    for tok in _split_path(path):
+    current = obj
+    for token in _split_path(path):
         try:
-            if isinstance(tok, int):
-                cur = cur[tok]
+            if isinstance(token, int):
+                if not isinstance(current, list) or token >= len(current):
+                    return default
+                current = current[token]
             else:
-                cur = cur[tok] if isinstance(cur, dict) else getattr(cur, tok)
-        except (KeyError, IndexError, AttributeError, TypeError):
+                if isinstance(current, dict):
+                    if token not in current:
+                        return default
+                    current = current[token]
+                else:
+                    current = getattr(current, token)
+        except (AttributeError, KeyError, IndexError, TypeError):
             return default
-    return cur
+    return current
 
 
 def _set(obj: Dict[str, Any], path: str, value: Any) -> None:
-    """Set a nested value inside a dict following a dotted path."""
     tokens = _split_path(path)
-    cur: Dict[str, Any] = obj
-    for tok in tokens[:-1]:
-        if isinstance(tok, int):
+    current = obj
+    for token in tokens[:-1]:
+        if isinstance(token, int):
             raise InvalidDestinationPath(path)
-        nxt = cur.get(tok)
-        if not isinstance(nxt, dict):
-            nxt = {}
-            cur[tok] = nxt
-        cur = nxt
+        if token not in current or not isinstance(current[token], dict):
+            current[token] = {}
+        current = current[token]
     last = tokens[-1]
     if isinstance(last, int):
         raise InvalidDestinationPath(path)
-    cur[last] = value
+    current[last] = value
 
 
 class Mapper:
-    """
-    A minimal, deterministic JSON payload mapper.
-
-    Rules:
-      - If the source path does not exist → raise MappingMissingError.
-      - If the source value is None → keep None (do not replace).
-      - Defaults apply ONLY when the destination field is absent (not set by map).
-        Defaults do not overwrite None or existing values.
-    """
-
-    def __init__(self) -> None:
-        pass
-
     def transform(self, spec: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform the given payload based on a mapping spec."""
         if not isinstance(spec, dict):
             raise TypeError("spec must be a dict.")
         if not isinstance(payload, dict):
             raise TypeError("payload must be a dict.")
 
-        out: Dict[str, Any] = {}
+        output: Dict[str, Any] = {}
 
-        # --- 1) Apply map (required sources)
         mapping = spec.get("map", {}) or {}
-        if not isinstance(mapping, dict):
-            raise TypeError("spec['map'] must be a dict of 'destination':'source'.")
+        for dest_path, src_path in mapping.items():
+            value = _get(payload, src_path, default=_MISSING)
+            if value is _MISSING:
+                raise MappingMissingError(src_path, dest_path)
+            _set(output, dest_path, value)
 
-        for dest, src in mapping.items():
-            if not isinstance(dest, str) or not isinstance(src, str):
-                raise TypeError("Mapping entries must be strings: dest:str -> source:str.")
-            val = _get(payload, src, default=_MISSING)
-            if val is _MISSING:
-                raise MappingMissingError(source_path=src, dest_path=dest)
-            _set(out, dest, val)  # Keep None as-is
-
-        # --- 2) Apply defaults (only when destination is absent)
         defaults = spec.get("defaults", {}) or {}
-        if not isinstance(defaults, dict):
-            raise TypeError("spec['defaults'] must be a dict of 'destination':value.")
-        for dest, fixed in defaults.items():
-            if _get(out, dest, default=_MISSING) is _MISSING:
-                _set(out, dest, fixed)
+        for dest_path, default_value in defaults.items():
+            if _get(output, dest_path, default=_MISSING) is _MISSING:
+                _set(output, dest_path, default_value)
 
-        return out
+        return output

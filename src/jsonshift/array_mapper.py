@@ -5,102 +5,81 @@ from .exceptions import MappingMissingError
 
 
 class ArrayMapper(Mapper):
-    """
-    Supports wildcard list mappings like:
-        "dest[*].id": "source[*].product_id"
-    """
-
     def transform(self, spec: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(spec, dict):
             raise TypeError("spec must be a dict.")
         if not isinstance(payload, dict):
             raise TypeError("payload must be a dict.")
 
-        out: Dict[str, Any] = {}
+        output: Dict[str, Any] = {}
 
         mapping = spec.get("map", {}) or {}
         defaults = spec.get("defaults", {}) or {}
 
-        # ------------------------------------------------------
-        # 1) APPLY MAPPING
-        # ------------------------------------------------------
-        for dest, src in mapping.items():
+        for dest_path, src_path in mapping.items():
+            src_has_wildcard = "[*]" in src_path
+            dest_has_wildcard = "[*]" in dest_path
 
-            # ---------- WILDCARD SOURCE ----------
-            if "[*]" in src:
-                src_prefix, src_suffix = src.split("[*]", 1)
-                src_prefix = src_prefix.rstrip(".")
-                src_suffix = src_suffix.lstrip(".")
-
-                # --------- DESTINATION WILDCARD FIX ----------
-                # Path to the list (before [*])
-                list_path = dest.split("[*]")[0].rstrip(".")
-
-                # Suffix after wildcard
-                dest_suffix = dest.split("[*]", 1)[1].lstrip(".")
-
-                # Load source list
-                src_list = _get(payload, src_prefix, default=_MISSING)
-                if src_list is _MISSING:
-                    raise MappingMissingError(src, dest)
-                if not isinstance(src_list, list):
-                    raise TypeError(
-                        f"Expected list at '{src_prefix}', got {type(src_list)}"
-                    )
-
-                # Load or initialize destination list
-                existing_list = _get(out, list_path, default=None)
-                if isinstance(existing_list, list):
-                    dest_list = existing_list
+            if src_has_wildcard or dest_has_wildcard:
+                if src_has_wildcard:
+                    src_prefix, src_suffix = src_path.split("[*]", 1)
+                    src_prefix = src_prefix.rstrip(".")
+                    src_suffix = src_suffix.lstrip(".")
+                    src_list = _get(payload, src_prefix, default=_MISSING)
+                    if src_list is _MISSING:
+                        raise MappingMissingError(src_path, dest_path)
+                    if not isinstance(src_list, list):
+                        raise TypeError(f"Expected list at '{src_prefix}', got {type(src_list)}")
                 else:
-                    dest_list = [{} for _ in src_list]
+                    src_list = [payload]
 
-                # Ensure same size
+                dest_prefix, dest_suffix = dest_path.split("[*]", 1)
+                dest_prefix = dest_prefix.rstrip(".")
+                dest_suffix = dest_suffix.lstrip(".")
+
+                existing_list = _get(output, dest_prefix, default=None)
+                dest_list = existing_list if isinstance(existing_list, list) else [{} for _ in src_list]
+
                 while len(dest_list) < len(src_list):
                     dest_list.append({})
 
-                # Fill each entry
-                for i, item in enumerate(src_list):
-                    val = _get(item, src_suffix, default=_MISSING)
-                    if val is _MISSING:
-                        raise MappingMissingError(src, dest)
+                for index, element in enumerate(src_list):
+                    if src_has_wildcard:
+                        value = _get(element, src_suffix, default=_MISSING)
+                    else:
+                        value = _get(payload, src_path, default=_MISSING)
+
+                    if value is _MISSING:
+                        raise MappingMissingError(src_path, dest_path)
 
                     if dest_suffix:
-                        _set(dest_list[i], dest_suffix, val)
+                        _set(dest_list[index], dest_suffix, value)
                     else:
-                        dest_list[i] = val
+                        dest_list[index] = value
 
-                # Save list back
-                _set(out, list_path, dest_list)
+                _set(output, dest_prefix, dest_list)
+                continue
 
-            # ---------- NORMAL MAPPING ----------
-            else:
-                val = _get(payload, src, default=_MISSING)
-                if val is _MISSING:
-                    raise MappingMissingError(src, dest)
-                _set(out, dest, val)
+            value = _get(payload, src_path, default=_MISSING)
+            if value is _MISSING:
+                raise MappingMissingError(src_path, dest_path)
+            _set(output, dest_path, value)
 
-        # ------------------------------------------------------
-        # 2) APPLY DEFAULTS
-        # ------------------------------------------------------
-        for dest, fixed in defaults.items():
+        for dest_path, default_value in defaults.items():
+            if "[*]" in dest_path:
+                dest_prefix, dest_suffix = dest_path.split("[*]", 1)
+                dest_prefix = dest_prefix.rstrip(".")
+                dest_suffix = dest_suffix.lstrip(".")
 
-            # defaults with wildcard
-            if "[*]" in dest:
-                list_path = dest.split("[*]")[0].rstrip(".")
-                dest_suffix = dest.split("[*]", 1)[1].lstrip(".")
-
-                dest_list = _get(out, list_path, default=None)
+                dest_list = _get(output, dest_prefix, default=None)
                 if not isinstance(dest_list, list):
                     continue
 
-                for obj in dest_list:
-                    if _get(obj, dest_suffix, default=_MISSING) is _MISSING:
-                        _set(obj, dest_suffix, fixed)
-
-            # defaults without wildcard
+                for entry in dest_list:
+                    if _get(entry, dest_suffix, default=_MISSING) is _MISSING:
+                        _set(entry, dest_suffix, default_value)
             else:
-                if _get(out, dest, default=_MISSING) is _MISSING:
-                    _set(out, dest, fixed)
+                if _get(output, dest_path, default=_MISSING) is _MISSING:
+                    _set(output, dest_path, default_value)
 
-        return out
+        return output
