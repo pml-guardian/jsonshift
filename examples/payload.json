@@ -1,0 +1,6 @@
+{
+  "name": "John Doe",
+  "cpf": "12345678901",
+  "amount": 1500.0,
+  "installments": 6
+}

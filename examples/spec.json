@@ -1,0 +1,12 @@
+{
+  "map": {
+    "customer.name": "name",
+    "customer.cpf": "cpf",
+    "contract.amount": "amount",
+    "contract.installments": "installments"
+  },
+  "defaults": {
+    "contract.type": "CCB",
+    "contract.origin": "ORQ"
+  }
+}

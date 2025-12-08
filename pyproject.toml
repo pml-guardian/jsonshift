@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jsonshift"
+version = "0.8.0"
+description = "A zero-dependency, deterministic JSON payload mapper that transforms source data into target structures using dotted paths and array indices."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "pml-guardian", email = "pml@guardian-asset.com" }]
+license = { text = "MIT" }
+keywords = ["json", "mapping", "transform", "payload", "data", "mapper", "integration"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/pml-guardian/jsonshift"
+Documentation = "https://github.com/pml-guardian/jsonshift#readme"
+Issues = "https://github.com/pml-guardian/jsonshift/issues"
+
+[project.scripts]
+jsonshift = "jsonshift.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
