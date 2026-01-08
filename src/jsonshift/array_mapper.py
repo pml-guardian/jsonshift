@@ -1,33 +1,71 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Tuple
-from .mapper import Mapper, _get, _set, _MISSING, _normalize_mapping_entry
+from typing import Any, Dict, List, Tuple, Union
+import re
+from .mapper import Mapper, _get, _MISSING, _normalize_mapping_entry
 from .exceptions import MappingMissingError
 
 
-def _parse_dest_path(path: str) -> List[Tuple[str, bool]]:
-    parts: List[Tuple[str, bool]] = []
+_INDEX = re.compile(r"^(?P<key>[^\[]+)\[(?P<index>\d+|\*)\]$")
+
+
+def _parse_dest_path(path: str) -> List[Tuple[str, Union[int, None]]]:
+    parts = []
     for segment in path.split("."):
-        if segment.endswith("[*]"):
-            parts.append((segment[:-3], True))
+        m = _INDEX.match(segment)
+        if m:
+            key = m.group("key")
+            idx = m.group("index")
+            parts.append((key, -1 if idx == "*" else int(idx)))
         else:
-            parts.append((segment, False))
+            parts.append((segment, None))
     return parts
 
 
-def _set_recursive(obj: Dict[str, Any], tokens, value, index: int) -> None:
-    key, is_list = tokens[0]
+def _ensure_list_size(lst: list, index: int):
+    while len(lst) <= index:
+        lst.append({})
 
-    if is_list:
+
+def _ensure_parent_structure(obj: Dict[str, Any], tokens, index: int):
+    if len(tokens) <= 1:
+        return
+
+    key, idx = tokens[0]
+
+    if idx is not None:
         lst = obj.setdefault(key, [])
-        while len(lst) <= index:
-            lst.append({})
-        target = lst[index]
+        if idx == -1:
+            _ensure_list_size(lst, index)
+            target = lst[index]
+        else:
+            _ensure_list_size(lst, idx)
+            target = lst[idx]
+    else:
+        target = obj.setdefault(key, {})
+
+    _ensure_parent_structure(target, tokens[1:], index)
+
+
+def _set_recursive(obj: Dict[str, Any], tokens, value, index: int):
+    key, idx = tokens[0]
+
+    if idx is not None:
+        lst = obj.setdefault(key, [])
+        if idx == -1:
+            _ensure_list_size(lst, index)
+            target = lst[index]
+        else:
+            _ensure_list_size(lst, idx)
+            target = lst[idx]
     else:
         target = obj.setdefault(key, {})
 
     if len(tokens) == 1:
-        if is_list:
-            obj[key][index] = value
+        if idx is not None:
+            if idx == -1:
+                lst[index] = value
+            else:
+                lst[idx] = value
         else:
             obj[key] = value
         return
@@ -35,16 +73,20 @@ def _set_recursive(obj: Dict[str, Any], tokens, value, index: int) -> None:
     _set_recursive(target, tokens[1:], value, index)
 
 
-def _apply_default_recursive(obj: Any, tokens, value) -> None:
-    key, is_list = tokens[0]
+def _apply_default_recursive(obj: Any, tokens, value):
+    key, idx = tokens[0]
 
-    if is_list:
+    if idx is not None:
         lst = obj.setdefault(key, [])
+        if idx == -1:
+            if not lst:
+                lst.append({})
+            targets = lst
+        else:
+            _ensure_list_size(lst, idx)
+            targets = [lst[idx]]
 
-        if not lst:
-            lst.append({})
-
-        for item in lst:
+        for item in targets:
             if len(tokens) == 1:
                 continue
             _apply_default_recursive(item, tokens[1:], value)
@@ -69,69 +111,52 @@ class ArrayMapper(Mapper):
             raise TypeError("payload must be a dict.")
 
         output: Dict[str, Any] = {}
-        mapping = spec.get("map", {}) or {}
-        defaults = spec.get("defaults", {}) or {}
 
-        for dest_path, entry in mapping.items():
+        for dest_path, entry in (spec.get("map") or {}).items():
             entry = _normalize_mapping_entry(entry)
             src_path = entry["path"]
             optional = entry["optional"]
 
             src_has_wildcard = "[*]" in src_path
-            dest_has_wildcard = "[*]" in dest_path
+            tokens = _parse_dest_path(dest_path)
 
-            if src_has_wildcard or dest_has_wildcard:
-                if src_has_wildcard:
-                    src_prefix, src_suffix = src_path.split("[*]", 1)
-                    src_prefix = src_prefix.rstrip(".")
-                    src_suffix = src_suffix.lstrip(".")
-                    src_list = _get(payload, src_prefix, default=_MISSING)
+            if src_has_wildcard:
+                src_prefix, src_suffix = src_path.split("[*]", 1)
+                src_prefix = src_prefix.rstrip(".")
+                src_suffix = src_suffix.lstrip(".")
 
-                    if src_list is _MISSING:
-                        if optional:
-                            continue
-                        raise MappingMissingError(src_path, dest_path)
+                src_list = _get(payload, src_prefix, default=_MISSING)
+                if src_list is _MISSING:
+                    if optional:
+                        continue
+                    raise MappingMissingError(src_path, dest_path)
 
-                    if not isinstance(src_list, list):
-                        raise TypeError(f"Expected list at '{src_prefix}', got {type(src_list)}")
-                else:
-                    src_list = [payload]
-                    src_suffix = src_path
-
-                dest_tokens = _parse_dest_path(dest_path)
+                if not isinstance(src_list, list):
+                    raise TypeError(f"Expected list at '{src_prefix}', got {type(src_list)}")
 
                 for index, element in enumerate(src_list):
-                    if src_has_wildcard:
-                        if not src_suffix:
-                            value = element
-                        else:
-                            value = _get(element, src_suffix, default=_MISSING)
-                    else:
-                        value = _get(payload, src_suffix, default=_MISSING)
+                    value = element if not src_suffix else _get(element, src_suffix, default=_MISSING)
 
                     if value is _MISSING:
                         if optional:
+                            _ensure_parent_structure(output, tokens, index)
                             continue
                         raise MappingMissingError(src_path, dest_path)
 
-                    _set_recursive(output, dest_tokens, value, index)
-
-                continue
-
-            value = _get(payload, src_path, default=_MISSING)
-            if value is _MISSING:
-                if optional:
-                    continue
-                raise MappingMissingError(src_path, dest_path)
-
-            _set(output, dest_path, value)
-
-        for dest_path, default_value in defaults.items():
-            if "[*]" in dest_path:
-                tokens = _parse_dest_path(dest_path)
-                _apply_default_recursive(output, tokens, default_value)
+                    _set_recursive(output, tokens, value, index)
             else:
-                if _get(output, dest_path, default=_MISSING) is _MISSING:
-                    _set(output, dest_path, default_value)
+                value = _get(payload, src_path, default=_MISSING)
+
+                if value is _MISSING:
+                    if optional:
+                        _ensure_parent_structure(output, tokens, 0)
+                        continue
+                    raise MappingMissingError(src_path, dest_path)
+
+                _set_recursive(output, tokens, value, 0)
+
+        for dest_path, default_value in (spec.get("defaults") or {}).items():
+            tokens = _parse_dest_path(dest_path)
+            _apply_default_recursive(output, tokens, default_value)
 
         return output

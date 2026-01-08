@@ -2,14 +2,31 @@
 
 A lightweight Python package to **convert one JSON payload into another** using a declarative mapping spec defined in JSON.
 
-**Engine rules (designed for system integrations):**
+Designed for **deterministic system integrations**, data pipelines, and API adapters.
 
-* If the **source path does not exist** → raises **`MappingMissingError`**.
-* If the **source value is `null` / `None`** → the destination receives **`None`** (not replaced).
-* `defaults` only fills values when the **destination field is absent** (does not overwrite `None` or existing values).
-* Supports **dotted and indexed paths**, e.g. `a.b[0].c`.
-* Extended mapper (`ArrayMapper`) supports **wildcard list expansion** using `[*]`.
-* NEW: Support for **optional mappings** using `optional: true`.
+---
+
+## ⚙️ Engine rules
+
+* If the **source path does not exist** → raises **`MappingMissingError`**
+  *(unless `optional: true` is set)*
+
+* If the **source value is `null` / `None`** → the destination receives **`None`**
+  *(defaults do NOT override `None`)*
+
+* `defaults` only fill values when the **destination field is absent**
+  *(never overwrite existing values or `None`)*
+
+* Supports **dotted paths**, **indexed paths** (`[0]`, `[1]`) and **wildcards** (`[*]`)
+
+* `ArrayMapper` supports:
+
+  * wildcard list expansion (`[*]`)
+  * fixed index creation (`[n]`)
+  * automatic list creation
+  * infinite nesting depth
+
+* NEW: Support for **optional mappings** using `optional: true`
 
 ---
 
@@ -23,7 +40,7 @@ pip install -e .
 
 ---
 
-## 🚀 Basic usage
+## 🚀 Basic usage (Mapper)
 
 ```python
 from jsonshift import Mapper
@@ -38,7 +55,7 @@ payload = {
 spec = {
   "map": {
     "customer.name": "customer_name",
-    "customer.cpf": "cpf",          # None is preserved
+    "customer.cpf": "cpf",
     "contract.amount": "amount",
     "contract.installments": "installments"
   },
@@ -50,18 +67,30 @@ spec = {
 
 out = Mapper().transform(spec, payload)
 print(out)
-# {
-#   "customer": {"name": "John Doe", "cpf": null},
-#   "contract": {"amount": 1000.0, "installments": 12, "type": "CCB", "origin": "ORQ"}
-# }
+```
+
+Output:
+
+```json
+{
+  "customer": {
+    "name": "John Doe",
+    "cpf": null
+  },
+  "contract": {
+    "amount": 1000.0,
+    "installments": 12,
+    "type": "CCB",
+    "origin": "ORQ"
+  }
+}
 ```
 
 ---
 
 ## 🧠 ArrayMapper — mapping lists with `[*]`
 
-The `ArrayMapper` extends `Mapper` and adds support for **wildcard list mappings**.
-You can transform lists of objects using the same declarative spec syntax.
+`ArrayMapper` extends `Mapper` and adds **powerful list handling**.
 
 ```python
 from jsonshift.array_mapper import ArrayMapper
@@ -87,30 +116,69 @@ spec = {
 
 out = ArrayMapper().transform(spec, payload)
 print(out)
-# {
-#   "new_products": [
-#     {"code": "P-001", "title": "Notebook", "price_brl": 4500.0, "available": 12, "currency": "BRL"},
-#     {"code": "P-002", "title": "Mouse Gamer", "price_brl": 250.0, "available": 100, "currency": "BRL"}
-#   ]
-# }
 ```
 
-🧩 The same number of elements is preserved — each input list item becomes one transformed output item.
-Defaults with wildcards (`new_products[*].currency`) apply individually to every object in the list.
+Output:
+
+```json
+{
+  "new_products": [
+    {
+      "code": "P-001",
+      "title": "Notebook",
+      "price_brl": 4500.0,
+      "available": 12,
+      "currency": "BRL"
+    },
+    {
+      "code": "P-002",
+      "title": "Mouse Gamer",
+      "price_brl": 250.0,
+      "available": 100,
+      "currency": "BRL"
+    }
+  ]
+}
+```
+
+Each input list item maps to exactly **one output item**.
+Defaults with wildcards apply **per element**, never globally.
+
+---
+
+## 🧩 Fixed indices (`[n]`) and list creation
+
+You can explicitly control list positions:
+
+```python
+spec = {
+    "map": {
+        "items[0].name": "source.name_1",
+        "items[1].name": "source.name_2"
+    }
+}
+```
+
+Lists are **automatically created and expanded** to fit the index.
 
 ---
 
 ## 🆕 Optional fields (`optional: true`)
 
-You can mark a mapping as **optional**, meaning:
+Optional mappings allow **graceful degradation** when a source field is missing.
 
-* If the source path exists → it is mapped normally
-* If the source path does NOT exist → it is silently ignored
-* No `MappingMissingError` is raised
+### Rules
 
-This is useful when transforming payloads with optional fields.
+* If the source exists → mapped normally
+* If the source does NOT exist:
 
-### Example (simple object)
+  * no error is raised
+  * destination structure is preserved
+  * the final field is NOT created
+
+---
+
+### Example — simple object
 
 ```python
 from jsonshift import Mapper
@@ -131,17 +199,24 @@ spec = {
 
 out = Mapper().transform(spec, payload)
 print(out)
-# {
-#   "user": {
-#     "full_name": "John Doe"
-#   }
-# }
 ```
 
-### Example (inside arrays)
+Output:
+
+```json
+{
+  "user": {
+    "full_name": "John Doe"
+  }
+}
+```
+
+---
+
+### Example — optional fields inside arrays
 
 ```python
-from jsonshift import ArrayMapper
+from jsonshift.array_mapper import ArrayMapper
 
 payload = {
     "users": [
@@ -161,54 +236,58 @@ spec = {
 
 out = ArrayMapper().transform(spec, payload)
 print(out)
-# {
-#   "items": [
-#       {},
-#       {"phone": "9999"}
-#   ]
-# }
 ```
 
-Optional mappings never overwrite defaults, and defaults only apply when the destination field does not exist.
+Output:
+
+```json
+{
+  "items": [
+    {},
+    {"phone": "9999"}
+  ]
+}
+```
+
+---
+
+## 🧬 Defaults with wildcards (advanced)
+
+Defaults can **create entire structures**, even without `map`:
+
+```python
+spec = {
+    "defaults": {
+        "a[*].b[*].c[*].value": 1
+    }
+}
+```
+
+Result:
+
+```json
+{
+  "a": [
+    {
+      "b": [
+        {
+          "c": [
+            {"value": 1}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
 
 ---
 
 ## 🖥️ Command-line interface (CLI)
 
 ```bash
-# Transform using JSON files
 jsonshift --spec spec.json --input payload.json
-
-# or via stdin
 cat payload.json | jsonshift --spec spec.json
-```
-
----
-
-## ▶️ Example run (from the repository)
-
-This repository includes ready-to-use files under the [`examples/`](./examples) folder.
-
-```bash
-# From the project root
-jsonshift --spec examples/spec.json --input examples/payload.json
-```
-
-**Expected output:**
-
-```json
-{
-  "customer": {
-    "name": "John Doe",
-    "cpf": "12345678901"
-  },
-  "contract": {
-    "amount": 1500.0,
-    "installments": 6,
-    "type": "CCB",
-    "origin": "ORQ"
-  }
-}
 ```
 
 ---
@@ -219,7 +298,8 @@ jsonshift --spec examples/spec.json --input examples/payload.json
 {
   "map": {
     "destination.path": "source.path",
-    "destination[*].field": "source[*].field"
+    "destination[*].field": "source[*].field",
+    "destination[0].field": "source.field"
   },
   "defaults": {
     "destination.path": "<fixed_value>",
@@ -232,25 +312,24 @@ jsonshift --spec examples/spec.json --input examples/payload.json
 
 ## ⚠️ Error handling
 
-* **`MappingMissingError`** — source path not found (unless `optional: true`).
-* **`InvalidDestinationPath`** — invalid destination (e.g., destination with index).
-* **`TypeError`** — source list expected but got non-list in wildcard paths.
+* **`MappingMissingError`** — source path not found (unless optional)
+* **`TypeError`** — wildcard source expected list but got non-list
 
 ---
 
 ## 🧪 Testing
 
-Run all unit tests:
-
 ```bash
 pytest -v
 ```
 
-Includes tests for:
+Includes coverage for:
 
 * Core `Mapper`
-* `ArrayMapper` wildcard behavior
-* Optional mappings (`optional: true`)
+* `ArrayMapper` with wildcards and fixed indices
+* Defaults auto-creation
+* Optional mappings
+* Deep nesting and mixed scenarios
 
 ---
 
