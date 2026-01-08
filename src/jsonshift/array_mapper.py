@@ -1,7 +1,65 @@
 from __future__ import annotations
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 from .mapper import Mapper, _get, _set, _MISSING, _normalize_mapping_entry
 from .exceptions import MappingMissingError
+
+
+def _parse_dest_path(path: str) -> List[Tuple[str, bool]]:
+    parts: List[Tuple[str, bool]] = []
+    for segment in path.split("."):
+        if segment.endswith("[*]"):
+            parts.append((segment[:-3], True))
+        else:
+            parts.append((segment, False))
+    return parts
+
+
+def _set_recursive(obj: Dict[str, Any], tokens, value, index: int) -> None:
+    key, is_list = tokens[0]
+
+    if is_list:
+        lst = obj.setdefault(key, [])
+        while len(lst) <= index:
+            lst.append({})
+        target = lst[index]
+    else:
+        target = obj.setdefault(key, {})
+
+    if len(tokens) == 1:
+        if is_list:
+            obj[key][index] = value
+        else:
+            obj[key] = value
+        return
+
+    _set_recursive(target, tokens[1:], value, index)
+
+
+def _apply_default_recursive(obj: Any, tokens, value) -> None:
+    key, is_list = tokens[0]
+
+    if is_list:
+        lst = obj.get(key)
+        if not isinstance(lst, list):
+            return
+
+        for item in lst:
+            if len(tokens) == 1:
+                if key not in obj:
+                    obj[key] = []
+                continue
+            _apply_default_recursive(item, tokens[1:], value)
+        return
+
+    if len(tokens) == 1:
+        if key not in obj:
+            obj[key] = value
+        return
+
+    if key not in obj or not isinstance(obj[key], dict):
+        return
+
+    _apply_default_recursive(obj[key], tokens[1:], value)
 
 
 class ArrayMapper(Mapper):
@@ -39,34 +97,23 @@ class ArrayMapper(Mapper):
                         raise TypeError(f"Expected list at '{src_prefix}', got {type(src_list)}")
                 else:
                     src_list = [payload]
+                    src_suffix = src_path
 
-                dest_prefix, dest_suffix = dest_path.split("[*]", 1)
-                dest_prefix = dest_prefix.rstrip(".")
-                dest_suffix = dest_suffix.lstrip(".")
-
-                existing_list = _get(output, dest_prefix, default=None)
-                dest_list = existing_list if isinstance(existing_list, list) else [{} for _ in src_list]
-
-                while len(dest_list) < len(src_list):
-                    dest_list.append({})
+                dest_tokens = _parse_dest_path(dest_path)
 
                 for index, element in enumerate(src_list):
                     if src_has_wildcard:
                         value = _get(element, src_suffix, default=_MISSING)
                     else:
-                        value = _get(payload, src_path, default=_MISSING)
+                        value = _get(payload, src_suffix, default=_MISSING)
 
                     if value is _MISSING:
                         if optional:
                             continue
                         raise MappingMissingError(src_path, dest_path)
 
-                    if dest_suffix:
-                        _set(dest_list[index], dest_suffix, value)
-                    else:
-                        dest_list[index] = value
+                    _set_recursive(output, dest_tokens, value, index)
 
-                _set(output, dest_prefix, dest_list)
                 continue
 
             value = _get(payload, src_path, default=_MISSING)
@@ -79,17 +126,8 @@ class ArrayMapper(Mapper):
 
         for dest_path, default_value in defaults.items():
             if "[*]" in dest_path:
-                dest_prefix, dest_suffix = dest_path.split("[*]", 1)
-                dest_prefix = dest_prefix.rstrip(".")
-                dest_suffix = dest_suffix.lstrip(".")
-                dest_list = _get(output, dest_prefix, default=None)
-
-                if not isinstance(dest_list, list):
-                    continue
-
-                for entry in dest_list:
-                    if _get(entry, dest_suffix, default=_MISSING) is _MISSING:
-                        _set(entry, dest_suffix, default_value)
+                tokens = _parse_dest_path(dest_path)
+                _apply_default_recursive(output, tokens, default_value)
             else:
                 if _get(output, dest_path, default=_MISSING) is _MISSING:
                     _set(output, dest_path, default_value)

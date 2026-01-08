@@ -25,12 +25,10 @@ def test_array_mapper_basic_list_transform():
 
     out = ArrayMapper().transform(spec, payload)
 
-    # Should produce the same number of products
     assert "new_products" in out
     assert isinstance(out["new_products"], list)
     assert len(out["new_products"]) == len(payload["products"])
 
-    # Verify first item mapping
     first = out["new_products"][0]
     assert first["code"] == "P-001"
     assert first["title"] == "Notebook Dell"
@@ -38,7 +36,6 @@ def test_array_mapper_basic_list_transform():
     assert first["available"] == 12
     assert first["currency"] == "BRL"
 
-    # All items must have the default applied
     for item in out["new_products"]:
         assert item["currency"] == "BRL"
 
@@ -46,6 +43,7 @@ def test_array_mapper_basic_list_transform():
 def test_array_mapper_raises_on_missing_source():
     payload = {"products": [{"id": "P-001"}]}
     spec = {"map": {"new_products[*].title": "products[*].name"}}
+
     mapper = ArrayMapper()
     with pytest.raises(Exception):
         mapper.transform(spec, payload)
