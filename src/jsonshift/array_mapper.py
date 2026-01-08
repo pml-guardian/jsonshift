@@ -39,14 +39,13 @@ def _apply_default_recursive(obj: Any, tokens, value) -> None:
     key, is_list = tokens[0]
 
     if is_list:
-        lst = obj.get(key)
-        if not isinstance(lst, list):
-            return
+        lst = obj.setdefault(key, [])
+
+        if not lst:
+            lst.append({})
 
         for item in lst:
             if len(tokens) == 1:
-                if key not in obj:
-                    obj[key] = []
                 continue
             _apply_default_recursive(item, tokens[1:], value)
         return
@@ -57,7 +56,7 @@ def _apply_default_recursive(obj: Any, tokens, value) -> None:
         return
 
     if key not in obj or not isinstance(obj[key], dict):
-        return
+        obj[key] = {}
 
     _apply_default_recursive(obj[key], tokens[1:], value)
 
@@ -103,7 +102,10 @@ class ArrayMapper(Mapper):
 
                 for index, element in enumerate(src_list):
                     if src_has_wildcard:
-                        value = _get(element, src_suffix, default=_MISSING)
+                        if not src_suffix:
+                            value = element
+                        else:
+                            value = _get(element, src_suffix, default=_MISSING)
                     else:
                         value = _get(payload, src_suffix, default=_MISSING)
 
