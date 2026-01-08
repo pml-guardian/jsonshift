@@ -1,6 +1,11 @@
 {
-  "name": "John Doe",
+  "customer_name": "John Doe",
   "cpf": "12345678901",
+  "email": "john@doe.com",
   "amount": 1500.0,
-  "installments": 6
+  "installments": 6,
+  "products": [
+    { "id": "P-001", "name": "Notebook", "price": 4500.0 },
+    { "id": "P-002", "name": "Mouse", "price": 250.0 }
+  ]
 }

@@ -1,12 +1,31 @@
 {
   "map": {
-    "customer.name": "name",
+    "customer.name": "customer_name",
     "customer.cpf": "cpf",
+    "customer.email": {
+      "path": "email",
+      "optional": true
+    },
+
     "contract.amount": "amount",
-    "contract.installments": "installments"
+    "contract.installments": "installments",
+
+    "contract.products[*].code": "products[*].id",
+    "contract.products[*].title": "products[*].name",
+    "contract.products[*].price": "products[*].price",
+
+    "contract.main_product[0].code": "products[0].id",
+    "contract.main_product[0].title": "products[0].name"
   },
+
   "defaults": {
     "contract.type": "CCB",
-    "contract.origin": "ORQ"
+    "contract.origin": "ORQ",
+
+    "contract.created_date": { "$now": "date" },
+    "contract.created_at": { "$now": "datetime" },
+    "contract.created_time": { "$now": "time" },
+
+    "contract.products[*].currency": "BRL"
   }
 }

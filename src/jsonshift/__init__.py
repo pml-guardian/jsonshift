@@ -1,7 +1,9 @@
 from .mapper import Mapper
-from .array_mapper import ArrayMapper
-from .exceptions import MappingMissingError, InvalidDestinationPath
+from .exceptions import MappingMissingError
 
-__all__ = ["Mapper", "ArrayMapper", "MappingMissingError", "InvalidDestinationPath"]
+__all__ = [
+    "Mapper",
+    "MappingMissingError",
+]
 
-__version__ = "0.9.0"
+__version__ = "1.0.0"

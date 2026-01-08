@@ -1,53 +1,60 @@
-# Python cache / build
+# =========================
+# Python
+# =========================
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-.venv.bak/
-
-# Distribution / packaging
-build/
-dist/
+*.pyo
+*.pyd
+*.so
 *.egg-info/
 .eggs/
+
+# =========================
+# Virtual environments
+# =========================
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+# Packaging / build
+# =========================
+build/
+dist/
+wheelhouse/
 pip-wheel-metadata/
-*.egg
-*.whl
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Unit test / coverage
-htmlcov/
-.tox/
-.nox/
+# =========================
+# Pytest / coverage
+# =========================
+.pytest_cache/
 .coverage
 .coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
+htmlcov/
+.cache/
 
-# IDEs / editors
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# IDEs / Editors
+# =========================
 .vscode/
 .idea/
 *.swp
 *.swo
-*.bak
+*~
+
+# =========================
+# OS files
+# =========================
 .DS_Store
+Thumbs.db
 
-# Logs
-*.log
-
-# Local examples / scratch
-examples/*.out
-examples/*.tmp
+# =========================
+# Project-specific
+# =========================
+uv.lock
