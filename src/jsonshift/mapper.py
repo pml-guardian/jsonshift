@@ -67,6 +67,8 @@ def _get_value(obj: Any, tokens, index: int):
     return current
 
 
+# ---------- DYNAMIC RESOLVERS ----------
+
 def _resolve_now(value):
     if not isinstance(value, dict) or "$now" not in value:
         return value
@@ -82,6 +84,86 @@ def _resolve_now(value):
         return now.time()
 
     raise ValueError(f"Invalid $now type: {kind}")
+
+
+def _resolve_path(path: str, payload: Dict[str, Any]):
+    tokens = _parse_path(path)
+    value = _get_value(payload, tokens, 0)
+    if value is _MISSING:
+        raise MappingMissingError(path, "dynamic")
+    return value
+
+
+def _resolve_concat(parts, payload):
+    if not isinstance(parts, list):
+        raise ValueError("$concat must be a list")
+
+    out = []
+    for part in parts:
+        if isinstance(part, dict) and "$path" in part:
+            out.append(str(_resolve_path(part["$path"], payload)))
+        elif isinstance(part, str):
+            out.append(part)
+        else:
+            raise ValueError("Invalid $concat element")
+
+    return "".join(out)
+
+
+def _resolve_format(expr, payload):
+    if not isinstance(expr, dict):
+        raise ValueError("$format must be an object")
+
+    template = expr.get("template")
+    args = expr.get("args", {})
+
+    if not isinstance(template, str) or not isinstance(args, dict):
+        raise ValueError("Invalid $format structure")
+
+    resolved = {
+        key: _resolve_path(value["$path"], payload)
+        for key, value in args.items()
+    }
+
+    return template.format(**resolved)
+
+
+def _resolve_upper(expr, payload):
+    if isinstance(expr, dict) and "$path" in expr:
+        value = _resolve_path(expr["$path"], payload)
+    else:
+        value = expr
+    return str(value).upper()
+
+
+def _resolve_lower(expr, payload):
+    if isinstance(expr, dict) and "$path" in expr:
+        value = _resolve_path(expr["$path"], payload)
+    else:
+        value = expr
+    return str(value).lower()
+
+
+def _resolve_dynamic(value, payload):
+    if not isinstance(value, dict):
+        return value
+
+    if "$now" in value:
+        return _resolve_now(value)
+
+    if "$concat" in value:
+        return _resolve_concat(value["$concat"], payload)
+
+    if "$format" in value:
+        return _resolve_format(value["$format"], payload)
+
+    if "$upper" in value:
+        return _resolve_upper(value["$upper"], payload)
+
+    if "$lower" in value:
+        return _resolve_lower(value["$lower"], payload)
+
+    return value
 
 
 def _normalize(entry):
@@ -133,7 +215,7 @@ class Mapper:
         # -------- DEFAULTS --------
         for dest_path, default in (spec.get("defaults") or {}).items():
             tokens = _parse_path(dest_path)
-            default = _resolve_now(default)
+            default = _resolve_dynamic(default, payload)
 
             index = 0
             existing = _get_value(output, tokens, index)

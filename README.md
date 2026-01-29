@@ -30,6 +30,10 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
   * `{ "$now": "date" }`
   * `{ "$now": "datetime" }`
   * `{ "$now": "time" }`
+  * `{ "$concat": [...] }`
+  * `{ "$upper": ... }`
+  * `{ "$lower": ... }`
+  * `{ "$format": { "template": "...", "args": {...} } }`
 
 ---
 
@@ -136,6 +140,93 @@ Output (example):
   }
 }
 ```
+
+---
+
+## 🧠 Dynamic string defaults
+
+In addition to static values and `$now`, `jsonshift` supports **dynamic string functions** inside `defaults`.
+
+These functions allow composing and transforming values from literals and payload fields in a **deterministic and explicit way**.
+
+---
+
+### 🔹 `$concat`
+
+Concatenates string literals and payload values.
+
+```json
+{
+  "defaults": {
+    "user.code": {
+      "$concat": [
+        "USR-",
+        { "$path": "id" }
+      ]
+    }
+  }
+}
+```
+
+Result:
+
+```json
+{
+  "user": {
+    "code": "USR-123"
+  }
+}
+```
+
+---
+
+### 🔹 `$upper` / `$lower`
+
+Transforms strings to upper or lower case.
+
+```json
+{
+  "defaults": {
+    "name_upper": {
+      "$upper": { "$path": "name" }
+    },
+    "email_lower": {
+      "$lower": { "$path": "email" }
+    }
+  }
+}
+```
+
+---
+
+### 🔹 `$format`
+
+Formats strings using Python-style templates.
+
+```json
+{
+  "defaults": {
+    "external_id": {
+      "$format": {
+        "template": "{id}-{cpf}",
+        "args": {
+          "id": { "$path": "id" },
+          "cpf": { "$path": "cpf" }
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+### 📌 Notes
+
+* Dynamic functions are evaluated **only inside `defaults`**
+* Paths must be explicitly declared using `{ "$path": "..." }`
+* Missing paths raise `MappingMissingError`
+* Dynamic defaults **never override existing values or `None`**
 
 ---
 
