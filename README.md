@@ -33,6 +33,8 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
   * `{ "$concat": [...] }`
   * `{ "$upper": ... }`
   * `{ "$lower": ... }`
+  * `{ "$capitalize": ... }`
+  * `{ "$title": ... }`
   * `{ "$format": { "template": "...", "args": {...} } }`
 
 ---
@@ -168,16 +170,6 @@ Concatenates string literals and payload values.
 }
 ```
 
-Result:
-
-```json
-{
-  "user": {
-    "code": "USR-123"
-  }
-}
-```
-
 ---
 
 ### 🔹 `$upper` / `$lower`
@@ -192,6 +184,38 @@ Transforms strings to upper or lower case.
     },
     "email_lower": {
       "$lower": { "$path": "email" }
+    }
+  }
+}
+```
+
+---
+
+### 🔹 `$capitalize`
+
+Capitalizes the first character of the string.
+
+```json
+{
+  "defaults": {
+    "first_name": {
+      "$capitalize": { "$path": "name" }
+    }
+  }
+}
+```
+
+---
+
+### 🔹 `$title`
+
+Converts the string to title case (first letter of each word).
+
+```json
+{
+  "defaults": {
+    "full_name": {
+      "$title": { "$path": "name" }
     }
   }
 }
@@ -226,6 +250,7 @@ Formats strings using Python-style templates.
 * Dynamic functions are evaluated **only inside `defaults`**
 * Paths must be explicitly declared using `{ "$path": "..." }`
 * Missing paths raise `MappingMissingError`
+* If any resolved value is `None`, the result is `None`
 * Dynamic defaults **never override existing values or `None`**
 
 ---
@@ -243,8 +268,6 @@ Or via `stdin`:
 ```bash
 cat examples/payload.json | jsonshift --spec examples/spec.json
 ```
-
-The output structure is identical to the Python example above.
 
 ---
 

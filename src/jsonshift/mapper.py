@@ -101,7 +101,10 @@ def _resolve_concat(parts, payload):
     out = []
     for part in parts:
         if isinstance(part, dict) and "$path" in part:
-            out.append(str(_resolve_path(part["$path"], payload)))
+            value = _resolve_path(part["$path"], payload)
+            if value is None:
+                return None
+            out.append(str(value))
         elif isinstance(part, str):
             out.append(part)
         else:
@@ -120,28 +123,58 @@ def _resolve_format(expr, payload):
     if not isinstance(template, str) or not isinstance(args, dict):
         raise ValueError("Invalid $format structure")
 
-    resolved = {
-        key: _resolve_path(value["$path"], payload)
-        for key, value in args.items()
-    }
+    resolved = {}
+    for key, value in args.items():
+        v = _resolve_path(value["$path"], payload)
+        if v is None:
+            return None
+        resolved[key] = v
 
     return template.format(**resolved)
 
 
 def _resolve_upper(expr, payload):
-    if isinstance(expr, dict) and "$path" in expr:
-        value = _resolve_path(expr["$path"], payload)
-    else:
-        value = expr
+    value = (
+        _resolve_path(expr["$path"], payload)
+        if isinstance(expr, dict) and "$path" in expr
+        else expr
+    )
+    if value is None:
+        return None
     return str(value).upper()
 
 
 def _resolve_lower(expr, payload):
-    if isinstance(expr, dict) and "$path" in expr:
-        value = _resolve_path(expr["$path"], payload)
-    else:
-        value = expr
+    value = (
+        _resolve_path(expr["$path"], payload)
+        if isinstance(expr, dict) and "$path" in expr
+        else expr
+    )
+    if value is None:
+        return None
     return str(value).lower()
+
+
+def _resolve_capitalize(expr, payload):
+    value = (
+        _resolve_path(expr["$path"], payload)
+        if isinstance(expr, dict) and "$path" in expr
+        else expr
+    )
+    if value is None:
+        return None
+    return str(value).capitalize()
+
+
+def _resolve_title(expr, payload):
+    value = (
+        _resolve_path(expr["$path"], payload)
+        if isinstance(expr, dict) and "$path" in expr
+        else expr
+    )
+    if value is None:
+        return None
+    return str(value).title()
 
 
 def _resolve_dynamic(value, payload):
@@ -162,6 +195,12 @@ def _resolve_dynamic(value, payload):
 
     if "$lower" in value:
         return _resolve_lower(value["$lower"], payload)
+
+    if "$capitalize" in value:
+        return _resolve_capitalize(value["$capitalize"], payload)
+
+    if "$title" in value:
+        return _resolve_title(value["$title"], payload)
 
     return value
 
