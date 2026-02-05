@@ -18,6 +18,7 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
   *(never overwrite existing values or `None`)*
 
 * Supports:
+
   * dotted paths
   * indexed paths (`[0]`)
   * wildcard paths (`[*]`)
@@ -25,17 +26,6 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
   * infinite nesting depth
 
 * Supports **optional mappings** using `optional: true`
-
-* Supports dynamic defaults:
-  * `{ "$now": "date" }`
-  * `{ "$now": "datetime" }`
-  * `{ "$now": "time" }`
-  * `{ "$concat": [...] }`
-  * `{ "$upper": ... }`
-  * `{ "$lower": ... }`
-  * `{ "$capitalize": ... }`
-  * `{ "$title": ... }`
-  * `{ "$format": { "template": "...", "args": {...} } }`
 
 ---
 
@@ -45,7 +35,7 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
 pip install jsonshift
 # or for development:
 pip install -e .[dev]
-````
+```
 
 ---
 
@@ -57,9 +47,8 @@ from jsonshift import Mapper
 payload = {
     "customer_name": "John Doe",
     "cpf": "12345678901",
-    "email": "john@doe.com",
+    "email": "JOHN@DOE.COM",
     "amount": 1500.0,
-    "installments": 6,
     "products": [
         {"id": "P-001", "name": "Notebook", "price": 4500.0},
         {"id": "P-002", "name": "Mouse", "price": 250.0}
@@ -70,31 +59,15 @@ spec = {
     "map": {
         "customer.name": "customer_name",
         "customer.cpf": "cpf",
-        "customer.email": {
-            "path": "email",
-            "optional": True
-        },
-
-        "contract.amount": "amount",
-        "contract.installments": "installments",
+        "customer.email": "email",
 
         "contract.products[*].code": "products[*].id",
-        "contract.products[*].title": "products[*].name",
-        "contract.products[*].price": "products[*].price",
-
-        "contract.main_product[0].code": "products[0].id",
-        "contract.main_product[0].title": "products[0].name"
+        "contract.products[*].price": "products[*].price"
     },
 
     "defaults": {
-        "contract.type": "CCB",
-        "contract.origin": "ORQ",
-
-        "contract.created_date": {"$now": "date"},
         "contract.created_at": {"$now": "datetime"},
-        "contract.created_time": {"$now": "time"},
-
-        "contract.products[*].currency": "BRL"
+        "contract.currency": "BRL"
     }
 }
 
@@ -102,65 +75,58 @@ out = Mapper().transform(spec, payload)
 print(out)
 ```
 
-Output (example):
+---
+
+## 🧠 Dynamic defaults
+
+Dynamic expressions are supported **only inside `defaults`** and are resolved recursively.
+
+All dynamic operators:
+
+* are explicit
+* are deterministic
+* do not override existing values
+* return `None` if any dependency resolves to `None`
+
+---
+
+## 🔹 `$path`
+
+Explicitly resolves a value from the payload.
 
 ```json
 {
-  "customer": {
-    "name": "John Doe",
-    "cpf": "12345678901",
-    "email": "john@doe.com"
-  },
-  "contract": {
-    "amount": 1500.0,
-    "installments": 6,
-    "type": "CCB",
-    "origin": "ORQ",
-    "created_date": "2025-01-08",
-    "created_at": "2025-01-08T12:00:00",
-    "created_time": "12:00:00",
-    "products": [
-      {
-        "code": "P-001",
-        "title": "Notebook",
-        "price": 4500.0,
-        "currency": "BRL"
-      },
-      {
-        "code": "P-002",
-        "title": "Mouse",
-        "price": 250.0,
-        "currency": "BRL"
-      }
-    ],
-    "main_product": [
-      {
-        "code": "P-001",
-        "title": "Notebook"
-      }
-    ]
+  "defaults": {
+    "user_id": { "$path": "id" }
   }
 }
 ```
 
 ---
 
-## 🧠 Dynamic string defaults
+## 🔹 `$now`
 
-In addition to static values and `$now`, `jsonshift` supports **dynamic string functions** inside `defaults`.
+Resolves the current time.
 
-These functions allow composing and transforming values from literals and payload fields in a **deterministic and explicit way**.
+```json
+{ "$now": "datetime" }
+{ "$now": "date" }
+{ "$now": "time" }
+{ "$now": "year" }
+{ "$now": "month" }
+{ "$now": "day" }
+```
 
 ---
 
-### 🔹 `$concat`
+## 🔹 `$concat`
 
-Concatenates string literals and payload values.
+Concatenates strings and resolved values.
 
 ```json
 {
   "defaults": {
-    "user.code": {
+    "code": {
       "$concat": [
         "USR-",
         { "$path": "id" }
@@ -172,101 +138,160 @@ Concatenates string literals and payload values.
 
 ---
 
-### 🔹 `$upper` / `$lower`
+## 🔹 String transforms
 
-Transforms strings to upper or lower case.
+```json
+{ "$upper": { "$path": "name" } }
+{ "$lower": { "$path": "email" } }
+{ "$capitalize": { "$path": "first_name" } }
+{ "$title": { "$path": "full_name" } }
+```
+
+---
+
+## 🔢 Math operators
+
+All math operators require numeric values.
+
+### `$add`
 
 ```json
 {
-  "defaults": {
-    "name_upper": {
-      "$upper": { "$path": "name" }
-    },
-    "email_lower": {
-      "$lower": { "$path": "email" }
-    }
+  "$add": {
+    "value": 10,
+    "by": 5
+  }
+}
+```
+
+### `$sub`, `$mul`, `$div`
+
+```json
+{
+  "$mul": {
+    "value": 100,
+    "by": 0.92
+  }
+}
+```
+
+Division by zero raises an error.
+
+---
+
+## 📅 Date arithmetic with `$add`
+
+`$add` also supports **date and datetime arithmetic**.
+
+```json
+{
+  "$add": {
+    "value": { "$now": "date" },
+    "by": { "days": 5 }
+  }
+}
+```
+
+Supported units:
+
+* `years`
+* `months`
+* `days`
+* `hours`
+* `minutes`
+* `seconds`
+
+---
+
+## 🔢 `$round`
+
+Rounds numeric values.
+
+```json
+{
+  "$round": {
+    "value": 3.14159,
+    "ndigits": 2
+  }
+}
+```
+
+Works with composed expressions.
+
+---
+
+## 🎨 `$format`
+
+### Date formatting (`strftime`)
+
+```json
+{
+  "$format": {
+    "value": { "$now": "datetime" },
+    "strftime": "%Y-%m-%d"
+  }
+}
+```
+
+### Masks (CPF / CNPJ / custom)
+
+```json
+{
+  "$format": {
+    "value": "12345678901",
+    "mask": "###.###.###-##"
   }
 }
 ```
 
 ---
 
-### 🔹 `$capitalize`
+## 🔗 Composition
 
-Capitalizes the first character of the string.
-
-```json
-{
-  "defaults": {
-    "first_name": {
-      "$capitalize": { "$path": "name" }
-    }
-  }
-}
-```
-
----
-
-### 🔹 `$title`
-
-Converts the string to title case (first letter of each word).
+Operators can be nested freely.
 
 ```json
 {
-  "defaults": {
-    "full_name": {
-      "$title": { "$path": "name" }
-    }
-  }
-}
-```
-
----
-
-### 🔹 `$format`
-
-Formats strings using Python-style templates.
-
-```json
-{
-  "defaults": {
-    "external_id": {
-      "$format": {
-        "template": "{id}-{cpf}",
-        "args": {
-          "id": { "$path": "id" },
-          "cpf": { "$path": "cpf" }
-        }
+  "$round": {
+    "value": {
+      "$mul": {
+        "value": 0.920066,
+        "by": 100
       }
-    }
+    },
+    "ndigits": 2
   }
 }
 ```
 
+Result:
+
+```json
+92.01
+```
+
 ---
 
-### 📌 Notes
+## 📌 Notes
 
-* Dynamic functions are evaluated **only inside `defaults`**
-* Paths must be explicitly declared using `{ "$path": "..." }`
+* Dynamic expressions are evaluated **only inside `defaults`**
+* `$path` must be explicit
 * Missing paths raise `MappingMissingError`
 * If any resolved value is `None`, the result is `None`
-* Dynamic defaults **never override existing values or `None`**
+* Defaults never override existing values
 
 ---
 
 ## 🖥️ Command-line interface (CLI)
 
-Using the same example from `examples/`:
-
 ```bash
 jsonshift --spec examples/spec.json --input examples/payload.json
 ```
 
-Or via `stdin`:
+Or via stdin:
 
 ```bash
-cat examples/payload.json | jsonshift --spec examples/spec.json
+cat payload.json | jsonshift --spec spec.json
 ```
 
 ---

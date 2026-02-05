@@ -2,8 +2,8 @@ import pytest
 from jsonshift import Mapper
 from jsonshift.exceptions import MappingMissingError
 
-
 # ---------- $concat ----------
+
 
 def test_concat_literal_and_path():
     payload = {"id": 123}
@@ -52,7 +52,7 @@ def test_concat_missing_path_raises():
         Mapper().transform(spec, {})
 
 
-# ---------- $upper / $lower ----------
+# ---------- string operators ----------
 
 def test_upper_with_path():
     payload = {"name": "John"}
@@ -97,33 +97,37 @@ def test_upper_literal():
     assert out["value"] == "ABC"
 
 
-# ---------- $format ----------
-
-def test_format_with_multiple_paths():
-    payload = {
-        "id": 10,
-        "cpf": "123"
-    }
+def test_capitalize():
+    payload = {"name": "john"}
 
     spec = {
         "defaults": {
-            "external_id": {
-                "$format": {
-                    "template": "{id}-{cpf}",
-                    "args": {
-                        "id": {"$path": "id"},
-                        "cpf": {"$path": "cpf"}
-                    }
-                }
+            "name": {
+                "$capitalize": {"$path": "name"}
             }
         }
     }
 
     out = Mapper().transform(spec, payload)
-    assert out["external_id"] == "10-123"
+    assert out["name"] == "John"
 
 
-# ---------- interaction with defaults ----------
+def test_title():
+    payload = {"name": "john doe"}
+
+    spec = {
+        "defaults": {
+            "name": {
+                "$title": {"$path": "name"}
+            }
+        }
+    }
+
+    out = Mapper().transform(spec, payload)
+    assert out["name"] == "John Doe"
+
+
+# ---------- defaults interaction ----------
 
 def test_dynamic_default_does_not_override_existing():
     payload = {"id": 1}
