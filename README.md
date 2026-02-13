@@ -217,13 +217,16 @@ Works with composed expressions.
 
 ## 🎨 `$format`
 
-### Date formatting (`strftime`)
+### Date formatting
 
 ```json
 {
   "$format": {
-    "value": { "$now": "datetime" },
-    "strftime": "%Y-%m-%d"
+    "value": "2024-06-01",
+    "date": {
+      "parse": "%Y-%m-%d",
+      "strftime": "%d/%m/%Y"
+    }
   }
 }
 ```

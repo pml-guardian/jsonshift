@@ -7,8 +7,11 @@ def test_format_strftime_date():
         "defaults": {
             "created": {
                 "$format": {
-                    "value": {"$now": "datetime"},
-                    "strftime": "%Y-%m-%d"
+                    "value": "2024-06-01",
+                    "date": {
+                        "parse": "%Y-%m-%d",
+                        "strftime": "%d/%m/%Y",
+                    },
                 }
             }
         }

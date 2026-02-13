@@ -274,11 +274,23 @@ def _resolve_format(expr, payload):
     if value is None:
         return None
 
-    if "strftime" in expr:
-        if not hasattr(value, "strftime"):
-            raise ValueError("$format.strftime requires date or datetime")
+    if "date" in expr:
+        cfg = expr["date"]
 
-        return value.strftime(expr["strftime"])
+        if isinstance(value, str) and "parse" in cfg:
+            try:
+                value = datetime.strptime(value, cfg["parse"])
+
+            except ValueError:
+                raise ValueError("Invalid date format for parsing")
+
+        if not isinstance(value, (datetime, date)):
+            raise ValueError("$format.date requires date or datetime")
+
+        if "strftime" in cfg:
+            return value.strftime(cfg["strftime"])
+
+        return value
 
     if "mask" in expr:
         return _apply_mask(str(value), expr["mask"])
