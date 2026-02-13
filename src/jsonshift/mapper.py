@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Dict, List, Tuple, Union
 from dateutil.relativedelta import relativedelta
 from .exceptions import MappingMissingError
@@ -79,6 +80,7 @@ def _resolve_all(obj: Any, tokens: List[Tuple[str, Union[int, None]]]):
 
             if sub:
                 results.extend(sub)
+
             else:
                 results.append(_MISSING)
 
@@ -118,6 +120,17 @@ def _set_value(obj: Dict[str, Any], tokens, value, index: int | None) -> None:
         return
 
     _set_value(target, tokens[1:], value, index)
+
+
+def _to_decimal(value):
+    if isinstance(value, Decimal):
+        return value
+
+    try:
+        return Decimal(str(value))
+
+    except (InvalidOperation, TypeError):
+        raise ValueError("Math operators require numeric values")
 
 
 def _resolve_path(path: str, payload: Dict[str, Any]):
@@ -188,16 +201,13 @@ def _resolve_add(expr, payload):
     if value is None:
         return None
 
-    if isinstance(value, (int, float)):
-        return value + by
-
     if isinstance(value, (datetime, date)):
         if not isinstance(by, dict):
             raise ValueError("$add.by must be an object for dates")
 
         return value + relativedelta(**by)
 
-    raise ValueError("$add unsupported type")
+    return _resolve_math(expr, payload, "add")
 
 
 def _resolve_math(expr, payload, op):
@@ -207,23 +217,25 @@ def _resolve_math(expr, payload, op):
     if value is None:
         return None
 
-    if not isinstance(value, (int, float)):
-        raise ValueError("Math operators require numeric values")
+    value = _to_decimal(value)
+    by = _to_decimal(by)
 
     if op == "add":
-        return value + by
+        return float(value + by)
 
     if op == "sub":
-        return value - by
+        return float(value - by)
 
     if op == "mul":
-        return value * by
+        return float(value * by)
 
     if op == "div":
         if by == 0:
             raise ValueError("Division by zero")
+        return float(value / by)
 
-        return value / by
+    if op == "pow":
+        return float(value**by)
 
     raise ValueError("Invalid math operator")
 
@@ -234,7 +246,12 @@ def _resolve_round(expr, payload):
     if value is None:
         return None
 
-    return round(value, int(expr["ndigits"]))
+    value = _to_decimal(value)
+    ndigits = int(expr["ndigits"])
+    quant = Decimal("1." + "0" * ndigits)
+    result = value.quantize(quant, rounding=ROUND_HALF_UP)
+
+    return float(result)
 
 
 def _apply_mask(value: str, mask: str) -> str:
@@ -265,6 +282,23 @@ def _resolve_format(expr, payload):
 
     if "mask" in expr:
         return _apply_mask(str(value), expr["mask"])
+
+    if "number" in expr:
+        value = _to_decimal(value)
+        decimals = expr["number"].get("decimals", 2)
+        thousand = expr["number"].get("thousand", ".")
+        decimal_sep = expr["number"].get("decimal", ",")
+        value = value.quantize(Decimal("1." + "0" * decimals), rounding=ROUND_HALF_UP)
+        parts = f"{value:.{decimals}f}".split(".")
+        integer = f"{int(parts[0]):,}"
+
+        if thousand != ",":
+            integer = integer.replace(",", thousand)
+
+        if decimals > 0:
+            return integer + decimal_sep + parts[1]
+
+        return integer
 
     raise ValueError("Invalid $format expression")
 
@@ -302,6 +336,9 @@ def _resolve_dynamic(value, payload):
 
     if "$div" in value:
         return _resolve_math(value["$div"], payload, "div")
+
+    if "$pow" in value:
+        return _resolve_math(value["$pow"], payload, "pow")
 
     if "$round" in value:
         return _resolve_round(value["$round"], payload)

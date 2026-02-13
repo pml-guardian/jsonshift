@@ -2,8 +2,6 @@ import pytest
 from jsonshift import Mapper
 from jsonshift.exceptions import MappingMissingError
 
-# ---------- $concat ----------
-
 
 def test_concat_literal_and_path():
     payload = {"id": 123}
@@ -51,8 +49,6 @@ def test_concat_missing_path_raises():
     with pytest.raises(MappingMissingError):
         Mapper().transform(spec, {})
 
-
-# ---------- string operators ----------
 
 def test_upper_with_path():
     payload = {"name": "John"}
@@ -126,8 +122,6 @@ def test_title():
     out = Mapper().transform(spec, payload)
     assert out["name"] == "John Doe"
 
-
-# ---------- defaults interaction ----------
 
 def test_dynamic_default_does_not_override_existing():
     payload = {"id": 1}
