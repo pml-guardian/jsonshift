@@ -151,20 +151,15 @@ Concatenates strings and resolved values.
 
 ## 🔢 Math operators
 
-All math operators require numeric values.
+All math operators:
 
-### `$add`
+* accept `int`, `float`, or numeric `string`
+* use `Decimal` internally
+* return `float`
 
-```json
-{
-  "$add": {
-    "value": 10,
-    "by": 5
-  }
-}
-```
+---
 
-### `$sub`, `$mul`, `$div`
+### `$add`, `$sub`, `$mul`, `$div`, `$pow`
 
 ```json
 {
@@ -233,6 +228,8 @@ Works with composed expressions.
 }
 ```
 
+---
+
 ### Masks (CPF / CNPJ / custom)
 
 ```json
@@ -240,6 +237,23 @@ Works with composed expressions.
   "$format": {
     "value": "12345678901",
     "mask": "###.###.###-##"
+  }
+}
+```
+
+---
+
+### 🔢 Number formatting
+
+```json
+{
+  "$format": {
+    "value": 10000,
+    "number": {
+      "decimals": 2,
+      "thousand": ".",
+      "decimal": ","
+    }
   }
 }
 ```
