@@ -53,12 +53,55 @@ def _get_value(obj: Any, tokens, index: int):
     return current
 
 
-def _set_value(obj: Dict[str, Any], tokens, value, index: int) -> None:
+def _resolve_all(obj: Any, tokens: List[Tuple[str, Union[int, None]]]):
+    if not tokens:
+        return [obj]
+
+    key, idx = tokens[0]
+    rest = tokens[1:]
+
+    if not isinstance(obj, dict) or key not in obj:
+        return []
+
+    current = obj[key]
+
+    if idx is None:
+        return _resolve_all(current, rest)
+
+    if not isinstance(current, list):
+        return []
+
+    if idx == -1:
+        results = []
+
+        for item in current:
+            sub = _resolve_all(item, rest)
+
+            if sub:
+                results.extend(sub)
+            else:
+                results.append(_MISSING)
+
+        return results
+
+    if idx < len(current):
+        return _resolve_all(current[idx], rest)
+
+    return []
+
+
+def _set_value(obj: Dict[str, Any], tokens, value, index: int | None) -> None:
     key, idx = tokens[0]
 
     if idx is not None:
         lst = obj.setdefault(key, [])
-        pos = index if idx == -1 else idx
+
+        if idx == -1:
+            pos = index
+
+        else:
+            pos = idx
+
         _ensure_list_size(lst, pos)
         target = lst[pos]
 
@@ -297,39 +340,22 @@ class Mapper:
             src_tokens = _parse_path(entry["path"])
             dest_tokens = _parse_path(dest_path)
             optional = entry["optional"]
-            has_star = any(idx == -1 for _, idx in src_tokens)
+            values = _resolve_all(payload, src_tokens)
 
-            if has_star:
-                src_key = src_tokens[0][0]
-                src_list = payload.get(src_key)
+            if not values:
+                if optional:
+                    continue
 
-                if not isinstance(src_list, list):
-                    if optional:
-                        continue
+                raise MappingMissingError(entry["path"], dest_path)
 
-                    raise MappingMissingError(entry["path"], dest_path)
-
-                for i in range(len(src_list)):
-                    value = _get_value(payload, src_tokens, i)
-
-                    if value is _MISSING:
-                        if optional:
-                            continue
-
-                        raise MappingMissingError(entry["path"], dest_path)
-
-                    _set_value(output, dest_tokens, value, i)
-
-            else:
-                value = _get_value(payload, src_tokens, 0)
-
+            for i, value in enumerate(values):
                 if value is _MISSING:
                     if optional:
                         continue
 
                     raise MappingMissingError(entry["path"], dest_path)
 
-                _set_value(output, dest_tokens, value, 0)
+                _set_value(output, dest_tokens, value, i)
 
         for dest_path, default in (spec.get("defaults") or {}).items():
             tokens = _parse_path(dest_path)
