@@ -196,8 +196,7 @@ def _resolve_concat(parts, payload):
 
 def _resolve_add(expr, payload):
     value = _resolve_dynamic(expr["value"], payload)
-    by = expr.get("by")
-
+    by = _resolve_dynamic(expr.get("by"), payload)
     if value is None:
         return None
 
@@ -212,7 +211,7 @@ def _resolve_add(expr, payload):
 
 def _resolve_math(expr, payload, op):
     value = _resolve_dynamic(expr["value"], payload)
-    by = expr.get("by")
+    by = _resolve_dynamic(expr.get("by"), payload)
 
     if value is None:
         return None
