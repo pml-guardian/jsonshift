@@ -251,6 +251,9 @@ def _resolve_concat(parts, payload, index: int = 0):
     for part in parts:
         value = _resolve_dynamic(part, payload, index)
 
+        if value is _MISSING:
+            return _MISSING
+
         if value is None:
             return None
 
@@ -262,6 +265,9 @@ def _resolve_concat(parts, payload, index: int = 0):
 def _resolve_add(expr, payload, index: int = 0):
     value = _resolve_dynamic(expr["value"], payload, index)
     by = _resolve_dynamic(expr.get("by"), payload, index)
+
+    if value is _MISSING:
+        return _MISSING
 
     if value is None:
         return None
@@ -281,6 +287,9 @@ def _resolve_add(expr, payload, index: int = 0):
 def _resolve_math(expr, payload, op, index: int = 0):
     value = _resolve_dynamic(expr["value"], payload, index)
     by = _resolve_dynamic(expr.get("by"), payload, index)
+
+    if value is _MISSING:
+        return _MISSING
 
     if value is None:
         return None
@@ -308,6 +317,9 @@ def _resolve_math(expr, payload, op, index: int = 0):
 
 def _resolve_round(expr, payload, index: int = 0):
     value = _resolve_dynamic(expr["value"], payload, index)
+
+    if value is _MISSING:
+        return _MISSING
 
     if value is None:
         return None
@@ -343,6 +355,9 @@ def _apply_mask(value: str, mask: str) -> str:
 
 def _resolve_format(expr, payload, index: int = 0):
     value = _resolve_dynamic(expr["value"], payload, index)
+
+    if value is _MISSING:
+        return _MISSING
 
     if value is None:
         return None
@@ -391,6 +406,9 @@ def _resolve_format(expr, payload, index: int = 0):
 def _string_op(expr, payload, fn, index: int = 0):
     value = _resolve_dynamic(expr, payload, index)
 
+    if value is _MISSING:
+        return _MISSING
+
     if value is None:
         return None
 
@@ -412,7 +430,7 @@ def _resolve_dynamic(value, payload, index: int = 0):
 
         except MappingMissingError:
             if optional:
-                return None
+                return _MISSING
 
             raise
 
@@ -635,15 +653,24 @@ class Mapper:
 
                 if isinstance(resolved, list):
                     for i, value in enumerate(resolved):
+                        if value is _MISSING:
+                            continue
+
                         if _get_value(output, tokens, i) is _MISSING:
                             _set_value(output, tokens, value, i)
 
                 else:
+                    if resolved is _MISSING:
+                        continue
+
                     if _get_value(output, tokens, 0) is _MISSING:
                         _set_value(output, tokens, resolved, 0)
 
             else:
                 resolved = _resolve_dynamic(default, payload)
+
+                if resolved is _MISSING:
+                    continue
 
                 if _get_value(output, tokens, 0) is _MISSING:
                     _set_value(output, tokens, resolved, 0)
