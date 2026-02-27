@@ -177,19 +177,12 @@ def _resolve_concat(parts, payload):
     out = []
 
     for part in parts:
-        if isinstance(part, dict) and "$path" in part:
-            value = _resolve_path(part["$path"], payload)
+        value = _resolve_dynamic(part, payload)
 
-            if value is None:
-                return None
+        if value is None:
+            return None
 
-            out.append(str(value))
-
-        elif isinstance(part, str):
-            out.append(part)
-
-        else:
-            raise ValueError("Invalid $concat element")
+        out.append(str(value))
 
     return "".join(out)
 
@@ -197,6 +190,7 @@ def _resolve_concat(parts, payload):
 def _resolve_add(expr, payload):
     value = _resolve_dynamic(expr["value"], payload)
     by = _resolve_dynamic(expr.get("by"), payload)
+
     if value is None:
         return None
 
@@ -206,7 +200,10 @@ def _resolve_add(expr, payload):
 
         return value + relativedelta(**by)
 
-    return _resolve_math(expr, payload, "add")
+    value = _to_decimal(value)
+    by = _to_decimal(by)
+
+    return float(value + by)
 
 
 def _resolve_math(expr, payload, op):
@@ -218,9 +215,6 @@ def _resolve_math(expr, payload, op):
 
     value = _to_decimal(value)
     by = _to_decimal(by)
-
-    if op == "add":
-        return float(value + by)
 
     if op == "sub":
         return float(value - by)
@@ -331,7 +325,16 @@ def _resolve_dynamic(value, payload):
         return _resolve_now(value["$now"])
 
     if "$path" in value:
-        return _resolve_path(value["$path"], payload)
+        optional = value.get("optional", False)
+
+        try:
+            return _resolve_path(value["$path"], payload)
+
+        except MappingMissingError:
+            if optional:
+                return None
+
+            raise
 
     if "$concat" in value:
         return _resolve_concat(value["$concat"], payload)
