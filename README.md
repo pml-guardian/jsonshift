@@ -26,6 +26,7 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
   * infinite nesting depth
 
 * Supports **optional mappings** using `optional: true`
+* Supports **conditional fields** using `$if` + comparison operators
 
 ---
 
@@ -263,6 +264,68 @@ Works with composed expressions.
 
 ---
 
+## 🔀 `$if`
+
+Conditionally creates a field based on a `condition`. Returns the value of `then` when the condition is truthy, or `else` when it is falsy/null/absent. If `else` is omitted and the condition fails, **the field is not created**.
+
+```json
+{
+  "defaults": {
+    "doc_id": {
+      "$if": {
+        "condition": { "$path": "secondary_doc", "optional": true },
+        "then": "2"
+      }
+    }
+  }
+}
+```
+
+With `else`:
+
+```json
+{
+  "defaults": {
+    "category": {
+      "$if": {
+        "condition": { "$gt": [{ "$path": "amount" }, 1000] },
+        "then": "premium",
+        "else": "standard"
+      }
+    }
+  }
+}
+```
+
+Both `then` and `else` accept any dynamic expression.
+
+---
+
+## ⚖️ Comparison operators
+
+Return `true` or `false`. Designed to be used as the `condition` of `$if`, but can also stand alone as a field value.
+
+| Operator | Meaning |
+|---|---|
+| `$eq` | equal (`==`) |
+| `$ne` | not equal (`!=`) |
+| `$gt` | greater than (`>`) |
+| `$gte` | greater than or equal (`>=`) |
+| `$lt` | less than (`<`) |
+| `$lte` | less than or equal (`<=`) |
+
+All operators receive a list of **exactly 2 elements**. Each element can be a static value or any dynamic expression.
+
+```json
+{ "$gt": [{ "$path": "score" }, 80] }
+{ "$eq": [{ "$path": "status" }, "active"] }
+{ "$gte": [{ "$path": "balance" }, { "$path": "minimum" }] }
+```
+
+If either operand resolves to `_MISSING`, the operator returns `_MISSING` and the field is skipped. For ordering operators (`$gt`, `$gte`, `$lt`, `$lte`), `null` on either side returns `false`. For `$eq`/`$ne`, `null` is a valid comparable value.
+
+---
+
 ## 🔗 Composition
 
 Operators can be nested freely.
@@ -296,6 +359,8 @@ Result:
 * Missing paths raise `MappingMissingError`
 * If any resolved value is `None`, the result is `None`
 * Defaults never override existing values
+* `$if` without `else` produces no field when the condition is falsy, null, or absent
+* Comparison operators expect exactly 2 elements and return `true`/`false`
 
 ---
 

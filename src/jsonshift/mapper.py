@@ -415,6 +415,58 @@ def _string_op(expr, payload, fn, index: int = 0):
     return fn(str(value))
 
 
+def _resolve_compare(operands, payload, op, index: int = 0):
+    if not isinstance(operands, list) or len(operands) != 2:
+        raise ValueError(f"${op} must be a list with exactly 2 elements")
+
+    left = _resolve_dynamic(operands[0], payload, index)
+    right = _resolve_dynamic(operands[1], payload, index)
+
+    if left is _MISSING or right is _MISSING:
+        return _MISSING
+
+    if op == "eq":
+        return left == right
+
+    if op == "ne":
+        return left != right
+
+    if left is None or right is None:
+        return False
+
+    if op == "gt":
+        return left > right
+
+    if op == "gte":
+        return left >= right
+
+    if op == "lt":
+        return left < right
+
+    if op == "lte":
+        return left <= right
+
+    raise ValueError(f"Invalid comparison operator: {op}")
+
+
+def _resolve_if(expr, payload, index: int = 0):
+    if not isinstance(expr, dict) or "condition" not in expr:
+        raise ValueError("$if must be an object with a 'condition' key")
+
+    condition = _resolve_dynamic(expr["condition"], payload, index)
+
+    if condition is _MISSING or condition is None or condition is False:
+        if "else" in expr:
+            return _resolve_dynamic(expr["else"], payload, index)
+
+        return _MISSING
+
+    if "then" in expr:
+        return _resolve_dynamic(expr["then"], payload, index)
+
+    return _MISSING
+
+
 def _resolve_dynamic(value, payload, index: int = 0):
     if not isinstance(value, dict):
         return value
@@ -469,6 +521,27 @@ def _resolve_dynamic(value, payload, index: int = 0):
 
     if "$title" in value:
         return _string_op(value["$title"], payload, str.title, index)
+
+    if "$eq" in value:
+        return _resolve_compare(value["$eq"], payload, "eq", index)
+
+    if "$ne" in value:
+        return _resolve_compare(value["$ne"], payload, "ne", index)
+
+    if "$gt" in value:
+        return _resolve_compare(value["$gt"], payload, "gt", index)
+
+    if "$gte" in value:
+        return _resolve_compare(value["$gte"], payload, "gte", index)
+
+    if "$lt" in value:
+        return _resolve_compare(value["$lt"], payload, "lt", index)
+
+    if "$lte" in value:
+        return _resolve_compare(value["$lte"], payload, "lte", index)
+
+    if "$if" in value:
+        return _resolve_if(value["$if"], payload, index)
 
     return value
 
