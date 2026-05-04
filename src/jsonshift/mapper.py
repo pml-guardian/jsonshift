@@ -449,6 +449,36 @@ def _resolve_compare(operands, payload, op, index: int = 0):
     raise ValueError(f"Invalid comparison operator: {op}")
 
 
+def _resolve_any(expr, payload, index: int = 0):
+    if not isinstance(expr, dict) or "path" not in expr:
+        raise ValueError("$any must be an object with a 'path' key")
+
+    tokens = _parse_path(expr["path"])
+    resolved = _resolve_all(payload, tokens)
+    values = resolved if resolved is not None else []
+
+    if not values:
+        return False
+
+    ops = {k: v for k, v in expr.items() if k != "path"}
+
+    if not ops:
+        return any(v is not None and v is not _MISSING and v is not False for v in values)
+
+    op, operand = next(iter(ops.items()))
+    op_map = {"eq": "eq", "ne": "ne", "gt": "gt", "gte": "gte", "lt": "lt", "lte": "lte"}
+
+    if op not in op_map:
+        raise ValueError(f"$any does not support operator '{op}'")
+
+    for v in values:
+        result = _resolve_compare([v, operand], payload, op_map[op], index)
+        if result is True:
+            return True
+
+    return False
+
+
 def _resolve_if(expr, payload, index: int = 0):
     if not isinstance(expr, dict) or "condition" not in expr:
         raise ValueError("$if must be an object with a 'condition' key")
@@ -539,6 +569,9 @@ def _resolve_dynamic(value, payload, index: int = 0):
 
     if "$lte" in value:
         return _resolve_compare(value["$lte"], payload, "lte", index)
+
+    if "$any" in value:
+        return _resolve_any(value["$any"], payload, index)
 
     if "$if" in value:
         return _resolve_if(value["$if"], payload, index)

@@ -27,6 +27,7 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
 
 * Supports **optional mappings** using `optional: true`
 * Supports **conditional fields** using `$if` + comparison operators
+* Supports **list membership checks** using `$any`
 
 ---
 
@@ -326,6 +327,50 @@ If either operand resolves to `_MISSING`, the operator returns `_MISSING` and th
 
 ---
 
+## 🔍 `$any`
+
+Returns `true` if **at least one item** in a wildcard path matches a condition. Returns `false` if no items match or the path is absent.
+
+```json
+{ "$any": { "path": "alerts[*].alert_type.code", "eq": 1 } }
+```
+
+Supports all comparison operators: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`.
+
+```json
+{ "$any": { "path": "items[*].price", "gt": 100 } }
+```
+
+Works with nested wildcards:
+
+```json
+{ "$any": { "path": "orders[*].items[*].status", "eq": "pending" } }
+```
+
+Without a comparator, returns `true` if any value is truthy:
+
+```json
+{ "$any": { "path": "flags[*].active" } }
+```
+
+Commonly used as a `$if` condition:
+
+```json
+{
+  "defaults": {
+    "has_termination": {
+      "$if": {
+        "condition": { "$any": { "path": "alerts[*].alert_type.code", "eq": 1 } },
+        "then": true,
+        "else": false
+      }
+    }
+  }
+}
+```
+
+---
+
 ## 🔗 Composition
 
 Operators can be nested freely.
@@ -361,6 +406,7 @@ Result:
 * Defaults never override existing values
 * `$if` without `else` produces no field when the condition is falsy, null, or absent
 * Comparison operators expect exactly 2 elements and return `true`/`false`
+* `$any` returns `false` when the list is empty or the path is absent — never raises
 
 ---
 
