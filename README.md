@@ -22,12 +22,15 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
   * dotted paths
   * indexed paths (`[0]`)
   * wildcard paths (`[*]`)
+  * append index (`[+]`) — destination only
   * automatic list creation
   * infinite nesting depth
 
 * Supports **optional mappings** using `optional: true`
 * Supports **conditional fields** using `$if` + comparison operators
 * Supports **list membership checks** using `$any`
+* Supports **string/list length** using `$len`
+* Supports **appending list elements** using `[+]`
 
 ---
 
@@ -147,6 +150,40 @@ Concatenates strings and resolved values.
 { "$lower": { "$path": "email" } }
 { "$capitalize": { "$path": "first_name" } }
 { "$title": { "$path": "full_name" } }
+```
+
+---
+
+## 🔢 `$len`
+
+Returns the length of a string, list or dict (number of keys).
+
+```json
+{ "$len": { "$path": "document" } }
+```
+
+Semantics:
+
+* resolves the operand via the dynamic engine
+* `_MISSING` → propagates (field skipped)
+* `None` → `None`
+* `str` / `list` / `dict` → `len(value)` (int)
+* `int` / `float` / `bool` → raises `ValueError`
+
+Typical use — derive a document type without mask hacks:
+
+```json
+{
+  "defaults": {
+    "person_type": {
+      "$if": {
+        "condition": { "$eq": [{ "$len": { "$path": "borrower.document" } }, 11] },
+        "then": "PF",
+        "else": "PJ"
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -371,6 +408,48 @@ Commonly used as a `$if` condition:
 
 ---
 
+## ➕ Append index `[+]`
+
+A destination path may end in `[+]` to **append a new element** to the end of a list.
+It is **write-only** (using `[+]` to read raises an error) and is meant for `defaults`.
+
+Because `defaults` run **after** `map`, the new element is appended **after** the
+elements produced by the mapping.
+
+```json
+{
+  "map": { "events[*].x": "items[*].a" },
+  "defaults": {
+    "events[+]": {
+      "type": "099",
+      "date": { "$path": "contract.maturity_date" },
+      "status": "1"
+    }
+  }
+}
+```
+
+With `payload = {"contract": {"maturity_date": "2026-03-10"}, "items": [{"a": 1}]}`:
+
+```json
+{ "events": [ { "x": 1 }, { "type": "099", "date": "2026-03-10", "status": "1" } ] }
+```
+
+Rules:
+
+* the `[+]` template is resolved **recursively** — every nested value passes through the
+  dynamic engine (`$path`, `$if`, `$len`, `$concat`, … and literals), unlike a plain
+  `defaults` value which only resolves at the top level
+* a leaf resolving to `_MISSING` (e.g. an absent `optional` `$path`) is dropped from the element
+* if the list does not exist yet, it is created
+* each `[+]` entry appends exactly **one** element; to append to two different lists use two
+  distinct keys (`events[+]` and `logs[+]`)
+* fixed indices may precede `[+]` (e.g. `groups[0].events[+]`)
+* `[+]` must be the **final** segment, and it **cannot** be combined with a wildcard `[*]`
+  in the same path — both raise a clear `ValueError`
+
+---
+
 ## 🔗 Composition
 
 Operators can be nested freely.
@@ -407,6 +486,8 @@ Result:
 * `$if` without `else` produces no field when the condition is falsy, null, or absent
 * Comparison operators expect exactly 2 elements and return `true`/`false`
 * `$any` returns `false` when the list is empty or the path is absent — never raises
+* `$len` returns an int for str/list/dict, `None` for `None`, and raises for numbers/bools
+* `[+]` is write-only, must be the final segment, and cannot be combined with `[*]`
 
 ---
 

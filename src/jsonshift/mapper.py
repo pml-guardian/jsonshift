@@ -7,7 +7,8 @@ from dateutil.relativedelta import relativedelta
 from .exceptions import MappingMissingError
 
 _MISSING = object()
-_INDEX = re.compile(r"^(?P<key>[^\[]+)\[(?P<index>\d+|\*)\]$")
+_APPEND = object()
+_INDEX = re.compile(r"^(?P<key>[^\[]+)\[(?P<index>\d+|\*|\+)\]$")
 
 
 def _parse_path(path: str) -> List[Tuple[str, Union[int, None]]]:
@@ -18,7 +19,17 @@ def _parse_path(path: str) -> List[Tuple[str, Union[int, None]]]:
 
         if m:
             idx = m.group("index")
-            parts.append((m.group("key"), -1 if idx == "*" else int(idx)))
+
+            if idx == "*":
+                resolved_idx = -1
+
+            elif idx == "+":
+                resolved_idx = _APPEND
+
+            else:
+                resolved_idx = int(idx)
+
+            parts.append((m.group("key"), resolved_idx))
 
         else:
             parts.append((segment, None))
@@ -35,6 +46,9 @@ def _get_value(obj: Any, tokens, index: int):
     current = obj
 
     for key, idx in tokens:
+        if idx is _APPEND:
+            raise ValueError("[+] is write-only and cannot be used to read values")
+
         if not isinstance(current, dict) or key not in current:
             return _MISSING
 
@@ -60,6 +74,9 @@ def _resolve_all(obj: Any, tokens: List[Tuple[str, Union[int, None]]]):
 
     key, idx = tokens[0]
     rest = tokens[1:]
+
+    if idx is _APPEND:
+        raise ValueError("[+] is write-only and cannot be used to read values")
 
     if not isinstance(obj, dict) or key not in obj:
         return None
@@ -99,6 +116,9 @@ def _resolve_all_with_indices(obj: Any, tokens: List[Tuple[str, Union[int, None]
     key, idx = tokens[0]
     rest = tokens[1:]
 
+    if idx is _APPEND:
+        raise ValueError("[+] is write-only and cannot be used to read values")
+
     if not isinstance(obj, dict) or key not in obj:
         return None
 
@@ -135,7 +155,16 @@ def _set_value(obj: Dict[str, Any], tokens, value, index: int | None) -> None:
 
     if idx is not None:
         lst = obj.setdefault(key, [])
-        pos = index if idx == -1 else idx
+
+        if idx is _APPEND:
+            pos = len(lst)
+
+        elif idx == -1:
+            pos = index
+
+        else:
+            pos = idx
+
         _ensure_list_size(lst, pos)
         target = lst[pos]
 
@@ -166,6 +195,9 @@ def _set_value_indexed(obj: Dict[str, Any], tokens, value, wildcard_indices: lis
             if idx == -1:
                 pos = wildcard_indices[wc_pos[0]]
                 wc_pos[0] += 1
+
+            elif idx is _APPEND:
+                pos = len(lst)
 
             else:
                 pos = idx
@@ -415,6 +447,21 @@ def _string_op(expr, payload, fn, index: int = 0):
     return fn(str(value))
 
 
+def _resolve_len(expr, payload, index: int = 0):
+    value = _resolve_dynamic(expr, payload, index)
+
+    if value is _MISSING:
+        return _MISSING
+
+    if value is None:
+        return None
+
+    if isinstance(value, (str, list, dict, tuple)):
+        return len(value)
+
+    raise ValueError("$len requires a string, list, or dict")
+
+
 def _resolve_compare(operands, payload, op, index: int = 0):
     if not isinstance(operands, list) or len(operands) != 2:
         raise ValueError(f"${op} must be a list with exactly 2 elements")
@@ -552,6 +599,9 @@ def _resolve_dynamic(value, payload, index: int = 0):
     if "$title" in value:
         return _string_op(value["$title"], payload, str.title, index)
 
+    if "$len" in value:
+        return _resolve_len(value["$len"], payload, index)
+
     if "$eq" in value:
         return _resolve_compare(value["$eq"], payload, "eq", index)
 
@@ -611,6 +661,9 @@ def _iter_all_values(payload, tokens):
 
     key, idx = tokens[0]
     rest = tokens[1:]
+
+    if idx is _APPEND:
+        raise ValueError("[+] is write-only and cannot be used to read values")
 
     if not isinstance(payload, dict) or key not in payload:
         return
@@ -686,6 +739,41 @@ def _resolve_dynamic_vectorized(expr, payload):
     return results
 
 
+def _deep_resolve(template, payload, index: int = 0):
+    if isinstance(template, dict):
+        resolved = _resolve_dynamic(template, payload, index)
+
+        if resolved is not template:
+            return resolved
+
+        out = {}
+
+        for k, v in template.items():
+            rv = _deep_resolve(v, payload, index)
+
+            if rv is _MISSING:
+                continue
+
+            out[k] = rv
+
+        return out
+
+    if isinstance(template, list):
+        out = []
+
+        for item in template:
+            rv = _deep_resolve(item, payload, index)
+
+            if rv is _MISSING:
+                continue
+
+            out.append(rv)
+
+        return out
+
+    return template
+
+
 def _normalize(entry):
     if isinstance(entry, str):
         return {"path": entry, "optional": False}
@@ -752,6 +840,27 @@ class Mapper:
 
         for dest_path, default in (spec.get("defaults") or {}).items():
             tokens = _parse_path(dest_path)
+
+            append_positions = [i for i, (_, idx) in enumerate(tokens) if idx is _APPEND]
+
+            if append_positions:
+                if append_positions != [len(tokens) - 1]:
+                    raise ValueError("[+] is only supported as the final path segment")
+
+                if any(idx == -1 for _, idx in tokens):
+                    raise ValueError(
+                        "[+] cannot be combined with wildcards ([*]) in the destination path"
+                    )
+
+                resolved = _deep_resolve(default, payload)
+
+                if resolved is _MISSING:
+                    continue
+
+                _set_value(output, tokens, resolved, 0)
+
+                continue
+
             has_wildcard_dest = any(idx == -1 for _, idx in tokens)
 
             if has_wildcard_dest and _has_wildcard_path(default):
