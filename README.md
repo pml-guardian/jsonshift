@@ -95,6 +95,24 @@ All dynamic operators:
 
 ---
 
+## 🧠 Wildcard defaults (broadcast)
+
+A default whose **destination** uses a wildcard (`[*]`) is **broadcast across every
+existing element** of that list, filling the field only where it is still absent:
+
+```json
+{
+  "map":      { "recipient.signers[*].name": "people[*].name" },
+  "defaults": { "recipient.signers[*].delivery_method": "email" }
+}
+```
+
+Every signer produced by `map` receives `"delivery_method": "email"` — not just the
+first. This works for static values and for non-wildcard `$path` defaults alike.
+If no list exists at that position yet, a single element is created.
+
+---
+
 ## 🔹 `$path`
 
 Explicitly resolves a value from the payload.

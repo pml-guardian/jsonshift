@@ -389,11 +389,61 @@ class TestWildcardStructureCreation:
                 "items[*].status": "pending"
             }
         }
-        
+
         result = Mapper().transform(spec, {})
-        
+
         assert "items" in result
         assert len(result["items"]) > 0
+
+    def test_static_default_broadcasts_to_all_wildcard_elements(self):
+        """A static wildcard default fills every existing element, not just [0]."""
+        payload = {"people": [{"name": "A"}, {"name": "B"}, {"name": "C"}]}
+        spec = {
+            "map": {"recipient.signers[*].name": "people[*].name"},
+            "defaults": {"recipient.signers[*].delivery_method": "email"},
+        }
+
+        result = Mapper().transform(spec, payload)
+        signers = result["recipient"]["signers"]
+
+        assert len(signers) == 3
+        assert all(s["delivery_method"] == "email" for s in signers)
+
+    def test_static_default_does_not_override_existing_wildcard_values(self):
+        """Broadcast defaults skip elements that already have the field."""
+        payload = {"people": [{"name": "A", "dm": "sms"}, {"name": "B"}]}
+        spec = {
+            "map": {
+                "recipient.signers[*].name": "people[*].name",
+                "recipient.signers[*].delivery_method": {
+                    "path": "people[*].dm",
+                    "optional": True,
+                },
+            },
+            "defaults": {"recipient.signers[*].delivery_method": "email"},
+        }
+
+        result = Mapper().transform(spec, payload)
+        signers = result["recipient"]["signers"]
+
+        assert signers[0]["delivery_method"] == "sms"
+        assert signers[1]["delivery_method"] == "email"
+
+    def test_non_wildcard_path_default_broadcasts_to_all_elements(self):
+        """A non-wildcard $path default is broadcast across every element."""
+        payload = {
+            "people": [{"name": "A"}, {"name": "B"}],
+            "sender": "noreply@x.com",
+        }
+        spec = {
+            "map": {"recipient.signers[*].name": "people[*].name"},
+            "defaults": {"recipient.signers[*].sender": {"$path": "sender"}},
+        }
+
+        result = Mapper().transform(spec, payload)
+        signers = result["recipient"]["signers"]
+
+        assert [s["sender"] for s in signers] == ["noreply@x.com", "noreply@x.com"]
 
     def test_fixed_index_creates_empty_elements(self):
         """Fixed index creates empty elements before it."""

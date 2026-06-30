@@ -226,6 +226,33 @@ def _count_wildcards(tokens) -> int:
     return sum(1 for _, idx in tokens if idx == -1)
 
 
+def _count_output_slots(output: Any, tokens) -> int | None:
+    """Length of the list at the first wildcard of ``tokens`` within ``output``.
+
+    Returns ``None`` when no list exists at that position (the destination path
+    is absent), so callers can tell "bootstrap a new element" apart from
+    "broadcast across an existing (possibly empty) list".
+    """
+    current = output
+
+    for key, idx in tokens:
+        if not isinstance(current, dict) or key not in current:
+            return None
+
+        current = current[key]
+
+        if idx == -1:
+            return len(current) if isinstance(current, list) else None
+
+        if idx is not None:
+            if not isinstance(current, list) or idx >= len(current):
+                return None
+
+            current = current[idx]
+
+    return None
+
+
 def _to_decimal(value):
     if isinstance(value, Decimal):
         return value
@@ -880,6 +907,25 @@ class Mapper:
 
                     if _get_value(output, tokens, 0) is _MISSING:
                         _set_value(output, tokens, resolved, 0)
+
+            elif has_wildcard_dest:
+                resolved = _resolve_dynamic(default, payload)
+
+                if resolved is _MISSING:
+                    continue
+
+                slots = _count_output_slots(output, tokens)
+
+                if slots is None:
+                    # No list exists yet: bootstrap a single element.
+                    if _get_value(output, tokens, 0) is _MISSING:
+                        _set_value(output, tokens, resolved, 0)
+
+                else:
+                    # Broadcast the default across every existing element.
+                    for i in range(slots):
+                        if _get_value(output, tokens, i) is _MISSING:
+                            _set_value(output, tokens, resolved, i)
 
             else:
                 resolved = _resolve_dynamic(default, payload)
