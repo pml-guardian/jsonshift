@@ -28,7 +28,8 @@ Designed for **deterministic system integrations**, data pipelines, and API adap
 
 * Supports **optional mappings** using `optional: true`
 * Supports **conditional fields** using `$if` + comparison operators
-* Supports **list membership checks** using `$any`
+* Supports **boolean composition** using `$and`, `$or`, `$not`, `$exists`
+* Supports **list predicates** using `$any`, `$all`, `$find`, `$filter`
 * Supports **string/list length** using `$len`
 * Supports **appending list elements** using `[+]`
 
@@ -382,6 +383,56 @@ If either operand resolves to `_MISSING`, the operator returns `_MISSING` and th
 
 ---
 
+## 🧮 Boolean operators
+
+`$and`, `$or` and `$not` compose any other expression and always return `true`/`false`.
+
+```json
+{ "$and": [{ "$eq": [{ "$path": "status" }, "active"] }, { "$gte": [{ "$path": "score" }, 80] }] }
+{ "$or": [{ "$exists": "email" }, { "$exists": "phone" }] }
+{ "$not": { "$eq": [{ "$path": "status" }, "canceled"] } }
+```
+
+**Truthiness**: only `null`, `false` and a missing value are falsy. `0`, `""` and `[]` are truthy —
+the same rule `$any` already uses without a comparator.
+
+Unlike the value operators (`$concat`, `$add`, ...), a missing operand does **not** propagate:
+`_MISSING` is simply falsy. That is what makes `$not` missing-tolerant:
+
+```json
+{ "$not": { "$eq": [{ "$path": "code" }, 15] } }
+```
+
+With `$ne`, an absent `code` resolves to `_MISSING` and the field is skipped. With `$not` + `$eq`,
+an absent `code` resolves to `true` — the reading "the code is not 15".
+
+`$and` stops on the first falsy condition and `$or` on the first truthy one, so short-circuiting
+can be used as a guard against `MappingMissingError`:
+
+```json
+{ "$and": [{ "$exists": "score" }, { "$gte": [{ "$path": "score" }, 700] }] }
+```
+
+`{ "$and": [] }` is `true` and `{ "$or": [] }` is `false`.
+
+---
+
+## 🔎 `$exists`
+
+Returns `true`/`false` for the presence of a path. It **never raises** and never returns `_MISSING`.
+
+```json
+{ "$exists": "employments[0].termination_date" }
+```
+
+`null` counts as missing by default. To treat a present-but-null key as existing:
+
+```json
+{ "$exists": { "path": "phone", "null_is_missing": false } }
+```
+
+---
+
 ## 🔍 `$any`
 
 Returns `true` if **at least one item** in a wildcard path matches a condition. Returns `false` if no items match or the path is absent.
@@ -422,6 +473,88 @@ Commonly used as a `$if` condition:
     }
   }
 }
+```
+
+### `where` — predicate per item
+
+A single comparator can only look at one field. `where` receives **one item at a time**, with the
+item as the root, so several fields of the *same* item can be tested together:
+
+```json
+{
+  "$any": {
+    "path": "alerts[*]",
+    "where": {
+      "$and": [
+        { "$not": { "$eq": [{ "$path": "alert_type.code" }, 15] } },
+        { "$not": { "$lt": [{ "$path": "absence_end_date" }, { "$format": { "value": { "$now": "date" }, "date": { "strftime": "%Y-%m-%d" } } }] } }
+      ]
+    }
+  }
+}
+```
+
+Note the path ends in `[*]` (the item itself), not in a field.
+
+Inside `where` every `$path` is **implicitly optional** — list items from a real API are
+heterogeneous, so an absent field resolves to `_MISSING` (falsy) instead of raising. Write
+`"optional": false` explicitly to opt back into strict behavior.
+
+`where` cannot be combined with a comparator (`eq`, `ne`, `gt`, ...) in the same expression.
+
+---
+
+## 🔍 `$all`
+
+Same form as `$any` (comparator or `where`), but returns `true` only when **every** item matches.
+An empty list or an absent path returns `true`.
+
+```json
+{ "$all": { "path": "installments[*].status", "eq": "paid" } }
+{ "$all": { "path": "items[*]", "where": { "$gte": [{ "$path": "value" }, 10] } } }
+```
+
+---
+
+## 🎯 `$find`
+
+Returns the **first matching item** instead of a boolean.
+
+```json
+{ "$find": { "path": "products[*]", "where": { "$eq": [{ "$path": "type_product" }, "LOAN"] } } }
+```
+
+`select` picks a value from the found item — a relative path, or any expression evaluated with
+the item as the root:
+
+```json
+{
+  "$find": {
+    "path": "products[*]",
+    "where": { "$eq": [{ "$path": "type_product" }, "LOAN"] },
+    "select": "available_balance",
+    "default": 0
+  }
+}
+```
+
+When nothing matches (or `select` resolves to nothing), `$find` returns `default` if declared,
+otherwise `_MISSING` and the field is skipped.
+
+---
+
+## 🧹 `$filter`
+
+Same form as `$find`, but returns **every** matching item as a list (empty when nothing matches).
+
+```json
+{ "$filter": { "path": "products[*]", "where": { "$eq": [{ "$path": "type_product" }, "LOAN"] }, "select": "id" } }
+```
+
+Combine with `$len` to count:
+
+```json
+{ "$len": { "$filter": { "path": "alerts[*]", "where": { "$ne": [{ "$path": "alert_type.code" }, 15] } } } }
 ```
 
 ---
@@ -504,6 +637,11 @@ Result:
 * `$if` without `else` produces no field when the condition is falsy, null, or absent
 * Comparison operators expect exactly 2 elements and return `true`/`false`
 * `$any` returns `false` when the list is empty or the path is absent — never raises
+* `$and`, `$or`, `$not` and `$exists` always return `true`/`false` — `_MISSING` is falsy, not propagated
+* `$exists` never raises and treats `null` as missing unless `null_is_missing: false`
+* `$all` returns `true` for an empty list or an absent path
+* `where` / `select` run with the item as the root and cannot read the outer payload
+* Every `$path` inside `where` / `select` is optional unless `"optional": false` is explicit
 * `$len` returns an int for str/list/dict, `None` for `None`, and raises for numbers/bools
 * `[+]` is write-only, must be the final segment, and cannot be combined with `[*]`
 

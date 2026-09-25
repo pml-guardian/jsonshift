@@ -9,6 +9,8 @@ from .exceptions import MappingMissingError
 _MISSING = object()
 _APPEND = object()
 _INDEX = re.compile(r"^(?P<key>[^\[]+)\[(?P<index>\d+|\*|\+)\]$")
+_COMPARISON_OPS = ("eq", "ne", "gt", "gte", "lt", "lte")
+_ITEM_SCOPED_KEYS = ("where", "select")
 
 
 def _parse_path(path: str) -> List[Tuple[str, Union[int, None]]]:
@@ -489,6 +491,25 @@ def _resolve_len(expr, payload, index: int = 0):
     raise ValueError("$len requires a string, list, or dict")
 
 
+def _is_truthy(value) -> bool:
+    return value is not _MISSING and value is not None and value is not False
+
+
+def _optional_paths(expr):
+    if isinstance(expr, dict):
+        out = {k: _optional_paths(v) for k, v in expr.items()}
+
+        if "$path" in out:
+            out.setdefault("optional", True)
+
+        return out
+
+    if isinstance(expr, list):
+        return [_optional_paths(item) for item in expr]
+
+    return expr
+
+
 def _resolve_compare(operands, payload, op, index: int = 0):
     if not isinstance(operands, list) or len(operands) != 2:
         raise ValueError(f"${op} must be a list with exactly 2 elements")
@@ -523,34 +544,155 @@ def _resolve_compare(operands, payload, op, index: int = 0):
     raise ValueError(f"Invalid comparison operator: {op}")
 
 
-def _resolve_any(expr, payload, index: int = 0):
-    if not isinstance(expr, dict) or "path" not in expr:
-        raise ValueError("$any must be an object with a 'path' key")
+def _resolve_and(conditions, payload, index: int = 0):
+    if not isinstance(conditions, list):
+        raise ValueError("$and must be a list")
 
-    tokens = _parse_path(expr["path"])
-    resolved = _resolve_all(payload, tokens)
-    values = resolved if resolved is not None else []
+    for condition in conditions:
+        if not _is_truthy(_resolve_dynamic(condition, payload, index)):
+            return False
 
-    if not values:
-        return False
+    return True
 
-    ops = {k: v for k, v in expr.items() if k != "path"}
 
-    if not ops:
-        return any(v is not None and v is not _MISSING and v is not False for v in values)
+def _resolve_or(conditions, payload, index: int = 0):
+    if not isinstance(conditions, list):
+        raise ValueError("$or must be a list")
 
-    op, operand = next(iter(ops.items()))
-    op_map = {"eq": "eq", "ne": "ne", "gt": "gt", "gte": "gte", "lt": "lt", "lte": "lte"}
-
-    if op not in op_map:
-        raise ValueError(f"$any does not support operator '{op}'")
-
-    for v in values:
-        result = _resolve_compare([v, operand], payload, op_map[op], index)
-        if result is True:
+    for condition in conditions:
+        if _is_truthy(_resolve_dynamic(condition, payload, index)):
             return True
 
     return False
+
+
+def _resolve_not(expr, payload, index: int = 0):
+    return not _is_truthy(_resolve_dynamic(expr, payload, index))
+
+
+def _resolve_exists(expr, payload, index: int = 0):
+    if isinstance(expr, str):
+        path = expr
+        null_is_missing = True
+
+    elif isinstance(expr, dict) and "path" in expr:
+        unknown = sorted(set(expr) - {"path", "null_is_missing"})
+
+        if unknown:
+            raise ValueError(f"$exists does not support key '{unknown[0]}'")
+
+        path = expr["path"]
+        null_is_missing = expr.get("null_is_missing", True)
+
+    else:
+        raise ValueError("$exists must be a path string or an object with a 'path' key")
+
+    value = _get_value(payload, _parse_path(path), index)
+
+    if value is _MISSING:
+        return False
+
+    if value is None:
+        return not null_is_missing
+
+    return True
+
+
+def _resolve_items(path: str, payload):
+    resolved = _resolve_all(payload, _parse_path(path))
+
+    return resolved if resolved is not None else []
+
+
+def _build_matcher(expr, payload, name: str, reserved, index: int):
+    if not isinstance(expr, dict) or "path" not in expr:
+        raise ValueError(f"${name} must be an object with a 'path' key")
+
+    ops = {k: v for k, v in expr.items() if k not in reserved}
+
+    if "where" in expr:
+        if ops:
+            raise ValueError(f"${name} cannot combine 'where' with comparison operators")
+
+        predicate = _optional_paths(expr["where"])
+
+        return lambda item: _is_truthy(_resolve_dynamic(predicate, item, index))
+
+    if not ops:
+        return _is_truthy
+
+    op, operand = next(iter(ops.items()))
+
+    if op not in _COMPARISON_OPS:
+        raise ValueError(f"${name} does not support operator '{op}'")
+
+    return lambda item: _resolve_compare([item, operand], payload, op, index) is True
+
+
+def _select_from(select, item, index: int):
+    if select is None:
+        return item
+
+    if isinstance(select, str):
+        return _get_value(item, _parse_path(select), index)
+
+    return _deep_resolve(select, item, index)
+
+
+def _resolve_any(expr, payload, index: int = 0):
+    matches = _build_matcher(expr, payload, "any", ("path", "where"), index)
+
+    for item in _resolve_items(expr["path"], payload):
+        if matches(item):
+            return True
+
+    return False
+
+
+def _resolve_every(expr, payload, index: int = 0):
+    matches = _build_matcher(expr, payload, "all", ("path", "where"), index)
+
+    for item in _resolve_items(expr["path"], payload):
+        if not matches(item):
+            return False
+
+    return True
+
+
+def _resolve_find(expr, payload, index: int = 0):
+    matches = _build_matcher(expr, payload, "find", ("path", "where", "select", "default"), index)
+    select = _optional_paths(expr["select"]) if "select" in expr else None
+    result = _MISSING
+
+    for item in _resolve_items(expr["path"], payload):
+        if matches(item):
+            result = _select_from(select, item, index)
+
+            break
+
+    if result is _MISSING and "default" in expr:
+        return _resolve_dynamic(expr["default"], payload, index)
+
+    return result
+
+
+def _resolve_filter(expr, payload, index: int = 0):
+    matches = _build_matcher(expr, payload, "filter", ("path", "where", "select"), index)
+    select = _optional_paths(expr["select"]) if "select" in expr else None
+    results = []
+
+    for item in _resolve_items(expr["path"], payload):
+        if not matches(item):
+            continue
+
+        value = _select_from(select, item, index)
+
+        if value is _MISSING:
+            continue
+
+        results.append(value)
+
+    return results
 
 
 def _resolve_if(expr, payload, index: int = 0):
@@ -647,8 +789,29 @@ def _resolve_dynamic(value, payload, index: int = 0):
     if "$lte" in value:
         return _resolve_compare(value["$lte"], payload, "lte", index)
 
+    if "$and" in value:
+        return _resolve_and(value["$and"], payload, index)
+
+    if "$or" in value:
+        return _resolve_or(value["$or"], payload, index)
+
+    if "$not" in value:
+        return _resolve_not(value["$not"], payload, index)
+
+    if "$exists" in value:
+        return _resolve_exists(value["$exists"], payload, index)
+
     if "$any" in value:
         return _resolve_any(value["$any"], payload, index)
+
+    if "$all" in value:
+        return _resolve_every(value["$all"], payload, index)
+
+    if "$find" in value:
+        return _resolve_find(value["$find"], payload, index)
+
+    if "$filter" in value:
+        return _resolve_filter(value["$filter"], payload, index)
 
     if "$if" in value:
         return _resolve_if(value["$if"], payload, index)
@@ -664,8 +827,12 @@ def _collect_wildcard_paths(expr) -> List[str]:
         return [expr["$path"]]
 
     result = []
+    item_scoped = "path" in expr
 
-    for v in expr.values():
+    for k, v in expr.items():
+        if item_scoped and k in _ITEM_SCOPED_KEYS:
+            continue
+
         if isinstance(v, dict):
             result.extend(_collect_wildcard_paths(v))
 
@@ -717,9 +884,13 @@ def _substitute_wildcard_paths(expr, subs: dict):
         return subs[expr["$path"]]
 
     result = {}
+    item_scoped = "path" in expr
 
     for k, v in expr.items():
-        if isinstance(v, dict):
+        if item_scoped and k in _ITEM_SCOPED_KEYS:
+            result[k] = v
+
+        elif isinstance(v, dict):
             result[k] = _substitute_wildcard_paths(v, subs)
 
         elif isinstance(v, list):
